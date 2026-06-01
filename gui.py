@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import ttk
 import queue
 import re
 import asyncio
@@ -42,22 +43,26 @@ COLOR_TEXT_DIM       = "#8892a4"
 COLOR_CONSOLE        = "#080810"
 COLOR_STATUS_OK      = "#00e676"
 COLOR_STATUS_RUN     = "#ffd600"
+COLOR_STATUS_CANCELLED = "#e74c3c"
+COLOR_TABLE_HEADER   = "#1e1e3a"
+COLOR_TABLE_ROW_EVEN = "#0c0c18"
+COLOR_TABLE_ROW_ODD  = "#10101f"
+COLOR_SCROLLBAR_BG   = "#1a1a2e"
+COLOR_SCROLLBAR_HANDLE = "#2a2a4a"
+COLOR_SCROLLBAR_HOVER = "#3a3a6a"
+COLOR_GRID_LINE      = "#4a4a6a"
 
 FONT_APP_TITLE  = ("Segoe UI", 15, "bold")
 FONT_SECTION    = ("Segoe UI", 10, "bold")
 FONT_LABEL      = ("Segoe UI", 11)
-FONT_VALUE_LG   = ("Segoe UI", 26, "bold")
-FONT_VALUE_MD   = ("Segoe UI", 13, "bold")
 FONT_BTN        = ("Segoe UI", 11, "bold")
-FONT_CONSOLE    = ("Consolas", 11)
+FONT_TABLE      = ("Segoe UI", 11)
+FONT_TABLE_HEADER = ("Segoe UI", 11, "bold")
 FONT_FOOTER     = ("Segoe UI", 10)
 
-CONSOLE_FONT_MIN     = 8
-CONSOLE_FONT_MAX     = 22
-CONSOLE_FONT_DEFAULT = 11
 POLL_INTERVAL_MS = 200
 
-# ── Configuración de Audio (voz.py integrada) ─────────────────────────────────
+# ── Configuración de Audio ─────────────────────────────────────────────────
 SR = 44100
 VOZ_TOMAS = "es-AR-TomasNeural"
 
@@ -97,7 +102,7 @@ def ejecutar_async_en_hilo(texto):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# VENTANA DE CONFIGURACIÓN DE CREDENCIALES (SOLO NODO)
+# VENTANA DE CONFIGURACIÓN DE CREDENCIALES
 # ══════════════════════════════════════════════════════════════════════════════
 
 class VentanaCredenciales(ctk.CTkToplevel):
@@ -194,128 +199,197 @@ class VentanaCredenciales(ctk.CTkToplevel):
             self.lbl_error.configure(text="Error al guardar. Verifica permisos del sistema.")
 
 
-# ── Componente CTkTable para Listado de Pedidos ───────────────────────────────
-class CTkTable(ctk.CTkFrame):
-    def __init__(self, parent, headers, col_weights, **kwargs):
-        super().__init__(parent, fg_color=COLOR_BORDER, corner_radius=8,
-                         border_width=1, border_color=COLOR_BORDER, **kwargs)
+# ══════════════════════════════════════════════════════════════════════════════
+# COMPONENTE MODERN TABLE (Estilo Excel con bordes, sin scrollbar horizontal)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ModernTable(ctk.CTkFrame):
+    """Tabla estilo Excel con bordes de celdas visibles y adaptable a la ventana"""
+    
+    def __init__(self, parent, headers, **kwargs):
+        super().__init__(parent, fg_color=COLOR_BG, corner_radius=0, **kwargs)
+        
         self.headers = headers
-        self.col_weights = col_weights
-
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        # ── Cabecera ──────────────────────────────────────────────────────────
-        self.header_frame = ctk.CTkFrame(self, fg_color=COLOR_PANEL,
-                                         corner_radius=0, height=45)
-        self.header_frame.grid(row=0, column=0, sticky="ew")
-        self.header_frame.grid_propagate(False)
-
-        for col_idx, weight in enumerate(col_weights):
-            self.header_frame.grid_columnconfigure(col_idx, weight=weight)
-
-        self.header_labels = []
-        for col_idx, header in enumerate(headers):
-            label = ctk.CTkLabel(
-                self.header_frame,
-                text=header,
-                font=("Segoe UI", 11, "bold"),
-                text_color=COLOR_TEXT,
-                fg_color=COLOR_PANEL,
-                anchor="center",
-                height=45,
-            )
-            label.grid(row=0, column=col_idx, sticky="nsew",
-                       padx=(0 if col_idx == 0 else 1, 0))
-            self.header_labels.append(label)
-
-        # ── Body desplazable ──────────────────────────────────────────────────
-        # CTkScrollableFrame solo expone 1 columna (col 0) hacia sus hijos;
-        # las filas deben ocupar esa única columna y manejar internamente
-        # sus propias columnas mediante un Frame hijo con grid.
-        self.scroll_frame = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", corner_radius=0
+        self.parent_frame = parent
+        
+        # Frame contenedor principal
+        self.table_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.table_container.pack(fill="both", expand=True)
+        
+        # Scrollbar vertical solamente
+        self.v_scrollbar = ttk.Scrollbar(
+            self.table_container,
+            orient="vertical"
         )
-        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-        # El ScrollableFrame solo tiene una columna real que debe expandirse
-        self.scroll_frame.grid_columnconfigure(0, weight=1)
-
-        self.rows = []
-
-    # ------------------------------------------------------------------
-    def _get_inner_frame(self):
-        """Devuelve el frame interno real del CTkScrollableFrame."""
-        # customtkinter expone el canvas como _parent_canvas
-        # y el frame contenedor como _scrollable_frame (v5.x) o como el
-        # primer hijo del canvas.  Usamos el atributo público cuando existe.
-        if hasattr(self.scroll_frame, "_scrollable_frame"):
-            return self.scroll_frame._scrollable_frame
-        # Fallback seguro: iterar hijos del canvas
-        for child in self.scroll_frame.winfo_children():
-            return child
-        return self.scroll_frame
-
-    # ------------------------------------------------------------------
+        self.v_scrollbar.pack(side="right", fill="y")
+        
+        # Treeview sin scrollbar horizontal
+        self.tree = ttk.Treeview(
+            self.table_container,
+            columns=headers,
+            show="headings",
+            selectmode="browse",
+            yscrollcommand=self.v_scrollbar.set
+        )
+        
+        self.v_scrollbar.config(command=self.tree.yview)
+        self.tree.pack(side="left", fill="both", expand=True)
+        
+        # Configurar columnas con peso variable para que se adapten
+        for idx, header in enumerate(headers):
+            self.tree.heading(header, text=header)
+            # Anchos iniciales pero que se adaptarán
+            if idx == 0:  # Factura
+                self.tree.column(header, width=140, minwidth=120, anchor="center")
+            elif idx == 1:  # Vendedor
+                self.tree.column(header, width=160, minwidth=120, anchor="w")
+            elif idx == 2:  # Cliente
+                self.tree.column(header, width=250, minwidth=180, anchor="w")
+            elif idx == 3:  # Monto
+                self.tree.column(header, width=120, minwidth=100, anchor="center")
+            elif idx == 4:  # Estado
+                self.tree.column(header, width=120, minwidth=100, anchor="center")
+        
+        # Configurar estilos estilo Excel
+        style = ttk.Style()
+        style.theme_use("clam")
+        
+        # Estilo para las celdas (con bordes)
+        style.configure("Excel.Treeview",
+                        background=COLOR_TABLE_ROW_ODD,
+                        foreground=COLOR_TEXT,
+                        fieldbackground=COLOR_TABLE_ROW_ODD,
+                        font=FONT_TABLE,
+                        rowheight=32,
+                        borderwidth=1,
+                        relief="solid")
+        
+        # Configurar bordes para las celdas
+        style.layout("Excel.Treeview", [
+            ('Treeview.field', {'sticky': 'nswe', 'border': 1, 'children': [
+                ('Treeview.padding', {'sticky': 'nswe', 'children': [
+                    ('Treeview.treearea', {'sticky': 'nswe'})
+                ]})
+            ]})
+        ])
+        
+        # Estilo para los encabezados
+        style.configure("Excel.Treeview.Heading",
+                        background=COLOR_TABLE_HEADER,
+                        foreground=COLOR_TEXT,
+                        font=FONT_TABLE_HEADER,
+                        relief="solid",
+                        borderwidth=1,
+                        bordercolor=COLOR_GRID_LINE)
+        
+        style.map("Excel.Treeview.Heading",
+                  background=[("active", COLOR_ACCENT)])
+        
+        style.map("Excel.Treeview",
+                  background=[("selected", COLOR_ACCENT)],
+                  foreground=[("selected", COLOR_TEXT)])
+        
+        # Estilo para scrollbar vertical
+        style.configure("Excel.Vertical.TScrollbar",
+                        background=COLOR_SCROLLBAR_BG,
+                        troughcolor=COLOR_SCROLLBAR_BG,
+                        bordercolor=COLOR_BORDER,
+                        lightcolor=COLOR_SCROLLBAR_HANDLE,
+                        darkcolor=COLOR_SCROLLBAR_HANDLE,
+                        arrowcolor=COLOR_TEXT_DIM,
+                        width=10)
+        
+        style.map("Excel.Vertical.TScrollbar",
+                  background=[("active", COLOR_SCROLLBAR_HOVER)],
+                  lightcolor=[("active", COLOR_SCROLLBAR_HOVER)],
+                  darkcolor=[("active", COLOR_SCROLLBAR_HOVER)])
+        
+        self.v_scrollbar.configure(style="Excel.Vertical.TScrollbar")
+        self.tree.configure(style="Excel.Treeview")
+        
+        # Configurar tags para colores de filas y estados
+        self.tree.tag_configure("odd", background=COLOR_TABLE_ROW_ODD)
+        self.tree.tag_configure("even", background=COLOR_TABLE_ROW_EVEN)
+        self.tree.tag_configure("completed", foreground=COLOR_STATUS_OK)
+        self.tree.tag_configure("pending", foreground=COLOR_STATUS_RUN)
+        self.tree.tag_configure("cancelled", foreground=COLOR_STATUS_CANCELLED)
+        
+        self.row_counter = 0
+        
+        # Bind para redimensionar columnas cuando cambia el tamaño
+        self.bind("<Configure>", self._on_resize)
+    
+    def _on_resize(self, event):
+        """Redimensiona las columnas cuando la ventana cambia de tamaño"""
+        if hasattr(self, '_resize_after') and self._resize_after:
+            self.after_cancel(self._resize_after)
+        self._resize_after = self.after(100, self._do_resize)
+    
+    def _do_resize(self):
+        """Aplica la redimensión de columnas basada en el ancho disponible"""
+        total_width = self.tree.winfo_width()
+        if total_width <= 0:
+            return
+        
+        # Distribución proporcional del ancho total
+        # Factura: 15%, Vendedor: 18%, Cliente: 35%, Monto: 15%, Estado: 17%
+        widths = [
+            int(total_width * 0.15),  # Factura
+            int(total_width * 0.18),  # Vendedor
+            int(total_width * 0.35),  # Cliente
+            int(total_width * 0.15),  # Monto
+            int(total_width * 0.17)   # Estado
+        ]
+        
+        # Asegurar anchos mínimos
+        min_widths = [120, 120, 180, 100, 100]
+        for i in range(len(widths)):
+            if widths[i] < min_widths[i]:
+                widths[i] = min_widths[i]
+        
+        # Aplicar nuevos anchos
+        for idx, header in enumerate(self.headers):
+            self.tree.column(header, width=widths[idx])
+        
+        self._resize_after = None
+    
     def clear(self):
-        """Elimina todas las filas de la tabla."""
-        for row_frame, _labels in self.rows:
-            row_frame.destroy()
-        self.rows.clear()
-        self.update_idletasks()
-
-    # ------------------------------------------------------------------
+        """Elimina todas las filas de la tabla"""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.row_counter = 0
+    
     def add_row(self, row_data):
-        """Agrega una fila a la tabla."""
-        row_idx = len(self.rows)
-
-        # El row_frame va dentro del CTkScrollableFrame (col 0) y se
-        # extiende todo el ancho; NO usamos grid_propagate(False) porque
-        # eso impide que el frame crezca con el ancho del contenedor.
-        row_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        row_frame.grid(row=row_idx, column=0, sticky="ew", pady=(0, 1))
-
-        # Configurar las columnas internas del row_frame
-        for col_idx, weight in enumerate(self.col_weights):
-            row_frame.grid_columnconfigure(col_idx, weight=weight)
-
-        row_labels = []
-
-        for col_idx, text in enumerate(row_data):
-            text_color = COLOR_TEXT
-            if col_idx == 4:  # Columna Estado
-                val_lower = text.lower()
-                if "finiquitado" in val_lower or "completado" in val_lower:
-                    text_color = COLOR_STATUS_OK
-                elif "pendiente" in val_lower:
-                    text_color = COLOR_STATUS_RUN
-                elif "anulado" in val_lower or "cancelado" in val_lower:
-                    text_color = COLOR_BTN_STOP_HOVER
-
-            label = ctk.CTkLabel(
-                row_frame,
-                text=text,
-                font=("Segoe UI", 11),
-                text_color=text_color,
-                fg_color=COLOR_CONSOLE,
-                anchor="center" if col_idx in [0, 3, 4] else "w",
-                height=38,
-            )
-            label.grid(
-                row=0,
-                column=col_idx,
-                sticky="nsew",
-                padx=(0 if col_idx == 0 else 1, 0),
-                pady=0,
-            )
-            row_labels.append(label)
-
-        self.rows.append((row_frame, row_labels))
-
-        # Scroll al final para ver los elementos nuevos
-        try:
-            self.scroll_frame._parent_canvas.yview_moveto(1.0)
-        except Exception:
-            pass
+        """Agrega una fila a la tabla con alternancia de colores"""
+        tag = "even" if self.row_counter % 2 == 0 else "odd"
+        
+        # Determinar tag adicional por estado
+        estado = str(row_data[4]).lower() if len(row_data) > 4 else ""
+        status_tag = ""
+        
+        if "completado" in estado or "finiquitado" in estado:
+            status_tag = "completed"
+        elif "pendiente" in estado:
+            status_tag = "pending"
+        elif "anulado" in estado or "cancelado" in estado:
+            status_tag = "cancelled"
+        
+        # Combinar tags
+        final_tag = (tag, status_tag) if status_tag else (tag,)
+        
+        self.tree.insert("", "end", values=row_data, tags=final_tag)
+        self.row_counter += 1
+    
+    def get_row_count(self):
+        return len(self.tree.get_children())
+    
+    def scroll_to_top(self):
+        """Desplaza el scroll hacia arriba"""
+        self.tree.yview_moveto(0.0)
+    
+    def scroll_to_bottom(self):
+        """Desplaza el scroll hacia abajo"""
+        self.tree.yview_moveto(1.0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -332,19 +406,20 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-        self.geometry("960x620")
-        self.minsize(760, 480)
+        # Tamaño inicial
+        self.geometry("1200x750")
+        self.minsize(900, 600)
         self.configure(fg_color=COLOR_BG)
 
         self.worker = SyncWorker()
         self._factura_count = 0
+        self._loading_data = False
 
         self._build_ui()
         self._poll_queue()
         self._verificar_credenciales_al_inicio()
         
-        # Cargar datos después de que la UI esté completamente renderizada
-        self.after(100, self.cargar_datos_excel)
+        self.after(500, self.cargar_datos_excel)
 
     def _verificar_credenciales_al_inicio(self):
         if not credenciales_configuradas():
@@ -360,11 +435,10 @@ class App(ctk.CTk):
         self._build_panel_derecho()
 
     def _build_panel_izquierdo(self):
-        left = ctk.CTkFrame(self, width=256, fg_color=COLOR_PANEL, corner_radius=0)
+        left = ctk.CTkFrame(self, width=280, fg_color=COLOR_PANEL, corner_radius=0)
         left.grid(row=0, column=0, sticky="nsew")
         left.grid_propagate(False)
 
-        # ── Cabecera ────────────────────────────────────────────
         ctk.CTkLabel(
             left, text="P E D I D O S",
             font=FONT_APP_TITLE, text_color=COLOR_TEXT
@@ -375,10 +449,9 @@ class App(ctk.CTk):
             font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM
         ).pack(padx=18, pady=(0, 24), anchor="w")
 
-        # ── Checkboxes ──────────────────────────────────────────
         self.check_sonido_var = ctk.StringVar(value="off")
         self.check_sonido = ctk.CTkCheckBox(
-            left, text="Sonido de notification.",
+            left, text="Sonido de notificación",
             font=FONT_LABEL, text_color=COLOR_TEXT,
             variable=self.check_sonido_var, onvalue="on", offvalue="off",
             command=self._on_check_sonido
@@ -387,42 +460,39 @@ class App(ctk.CTk):
 
         self.check_lectura_var = ctk.StringVar(value="off")
         self.check_lectura = ctk.CTkCheckBox(
-            left, text="Lectura de mensajes.",
+            left, text="Lectura de mensajes",
             font=FONT_LABEL, text_color=COLOR_TEXT,
             variable=self.check_lectura_var, onvalue="on", offvalue="off",
             command=self._on_check_lectura
         )
         self.check_lectura.pack(padx=18, pady=(0, 24), anchor="w")
 
-        # ── Botones de Control ──────────────────────────────────
         self.btn_iniciar = ctk.CTkButton(
             left, text="▶  Iniciar Sincronización",
             font=FONT_BTN, fg_color=COLOR_BTN_BLUE, hover_color=COLOR_BTN_HOVER,
-            corner_radius=7, height=36, command=self._on_iniciar
+            corner_radius=7, height=40, command=self._on_iniciar
         )
         self.btn_iniciar.pack(padx=18, pady=(0, 10), fill="x")
 
         self.btn_detener = ctk.CTkButton(
             left, text="⏹  Detener",
             font=FONT_BTN, fg_color=COLOR_BTN_STOP, hover_color=COLOR_BTN_STOP_HOVER,
-            corner_radius=7, height=36, command=self._on_detener
+            corner_radius=7, height=40, command=self._on_detener
         )
         self.btn_detener.pack(padx=18, pady=(0, 24), fill="x")
 
-        # ── Botón Configurar Credenciales ──────────────────────
         self.btn_config = ctk.CTkButton(
             left, text="🔧  Configurar Credenciales",
             font=FONT_BTN, fg_color=COLOR_BTN_CONFIG, hover_color=COLOR_BTN_CONFIG_HOV,
-            corner_radius=7, height=36, command=self._on_config_credenciales
+            corner_radius=7, height=40, command=self._on_config_credenciales
         )
-        self.btn_config.pack(side="bottom", fill="x", padx=18, pady=(0, 10))
+        self.btn_config.pack(side="bottom", fill="x", padx=18, pady=(0, 15))
 
-        # ── Footer ───────────────────────────────────────────────
         self.lbl_footer = ctk.CTkLabel(
             left, text="Listo.",
             font=FONT_FOOTER, text_color=COLOR_TEXT_DIM
         )
-        self.lbl_footer.pack(side="bottom", fill="x", padx=18, pady=(0, 10))
+        self.lbl_footer.pack(side="bottom", fill="x", padx=18, pady=(0, 15))
 
     def _build_panel_derecho(self):
         right = ctk.CTkFrame(self, fg_color=COLOR_BG, corner_radius=0)
@@ -430,22 +500,44 @@ class App(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
 
-        # Título
+        header_frame = ctk.CTkFrame(right, fg_color="transparent")
+        header_frame.grid(row=0, column=0, pady=(0, 15), sticky="ew")
+        header_frame.grid_columnconfigure(0, weight=1)
+        header_frame.grid_columnconfigure(1, weight=0)
+        header_frame.grid_columnconfigure(2, weight=0)
+        
         ctk.CTkLabel(
-            right, text="LISTADO DE PEDIDOS",
+            header_frame, text="LISTADO DE PEDIDOS",
             font=("Segoe UI", 20, "bold"), text_color=COLOR_TEXT
-        ).grid(row=0, column=0, pady=(0, 15))
-
-        # Tabla de visualización (CTkTable)
-        self.table_pedidos = CTkTable(
-            right,
-            headers=["#", "Vendedor", "Cliente", "Monto", "Estado"],
-            col_weights=[2, 2, 3, 2, 2]
+        ).grid(row=0, column=0, sticky="w")
+        
+        self.lbl_pedidos_count = ctk.CTkLabel(
+            header_frame, text="0 pedidos",
+            font=("Segoe UI", 12), text_color=COLOR_TEXT_DIM
         )
-        self.table_pedidos.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self.lbl_pedidos_count.grid(row=0, column=1, sticky="e", padx=(0, 10))
+        
+        # Botón para ir al inicio del scroll
+        self.btn_scroll_top = ctk.CTkButton(
+            header_frame, text="▲ Ir arriba", width=100, height=30,
+            font=("Segoe UI", 10), fg_color=COLOR_ACCENT,
+            hover_color=COLOR_BORDER, command=self._scroll_to_top
+        )
+        self.btn_scroll_top.grid(row=0, column=2, sticky="e")
+
+        # Tabla estilo Excel que se adapta al tamaño
+        self.table_pedidos = ModernTable(
+            right,
+            headers=["#", "Vendedor", "Cliente", "Monto", "Estado"]
+        )
+        self.table_pedidos.grid(row=1, column=0, sticky="nsew")
+    
+    def _scroll_to_top(self):
+        """Desplaza la tabla hacia arriba"""
+        self.table_pedidos.scroll_to_top()
 
     # ──────────────────────────────────────────────────────────────
-    # ACCIONES DE LOS CHECKBOXES
+    # ACCIONES
     # ──────────────────────────────────────────────────────────────
 
     def _on_check_sonido(self):
@@ -455,10 +547,6 @@ class App(ctk.CTk):
     def _on_check_lectura(self):
         if self.check_lectura_var.get() == "on":
             ejecutar_async_en_hilo("La lectura de mensajes está activada.")
-
-    # ──────────────────────────────────────────────────────────────
-    # HANDLERS DE CONTROL
-    # ──────────────────────────────────────────────────────────────
 
     def _on_config_credenciales(self):
         VentanaCredenciales(self, on_guardado=self._on_credenciales_guardadas)
@@ -490,11 +578,9 @@ class App(ctk.CTk):
             self._log_console("[INFO] El proceso no está activo.", "info")
 
     def _log_console(self, text: str, tag: str = ""):
-        # Imprimir logs a la consola de terminal estándar ya que la GUI no la muestra
         clean_text = text.strip()
         print(f"[{tag.upper() if tag else 'LOG'}] {clean_text}")
         
-        # Reflejar el log relevante como estado en el pie de página (footer)
         if tag in ["warn", "error"] or "✔" in clean_text or "INFO" in clean_text or "AUTH" in clean_text:
             self.lbl_footer.configure(text=clean_text[:50])
 
@@ -517,7 +603,6 @@ class App(ctk.CTk):
                     self.cargar_datos_excel()
         except queue.Empty:
             pass
-        # Drenar cola de latencia para prevenir fugas de memoria
         try:
             while True:
                 self.worker.latency_queue.get_nowait()
@@ -527,8 +612,12 @@ class App(ctk.CTk):
 
     def cargar_datos_excel(self):
         """Carga los datos del Excel y los muestra en la tabla"""
+        if self._loading_data:
+            return
+        
+        self._loading_data = True
+        
         try:
-            # Determinar el directorio raíz
             if getattr(sys, 'frozen', False):
                 root_dir = os.path.dirname(os.path.abspath(sys.executable))
             else:
@@ -537,7 +626,6 @@ class App(ctk.CTk):
             filepath = os.path.join(root_dir, "reporte_pedidos.xlsx")
             alt_filepath = os.path.join(root_dir, "reporte_pedidos_NUEVO.xlsx")
             
-            # Intentar renombrar reporte_pedidos_NUEVO.xlsx a reporte_pedidos.xlsx si ya no está bloqueado
             if os.path.exists(alt_filepath):
                 try:
                     if os.path.exists(filepath):
@@ -552,19 +640,15 @@ class App(ctk.CTk):
                 used_path = alt_filepath
                 
             if not os.path.exists(used_path):
-                print(f"DEBUG: No existe el archivo: {used_path}")
                 return
                 
-            print(f"DEBUG: Leyendo archivo: {used_path}")
-            
-            # Leer excel de forma segura liberando el handle
+            df = None
             try:
                 with open(used_path, "rb") as f:
                     df = pd.read_excel(f)
             except PermissionError:
-                self._log_console("[WARN] El archivo 'reporte_pedidos.xlsx' está abierto en Excel. Ciérrelo para actualizar.", "warn")
+                self._log_console("[WARN] El archivo está abierto en Excel. Ciérrelo para actualizar.", "warn")
                 self.lbl_footer.configure(text="⚠ Archivo bloqueado por Excel.")
-                # Si no podemos leer el original, intentamos leer el alternativo si existe
                 if os.path.exists(alt_filepath):
                     with open(alt_filepath, "rb") as f:
                         df = pd.read_excel(f)
@@ -575,27 +659,17 @@ class App(ctk.CTk):
                 return
 
             if df is None or df.empty:
-                print("DEBUG: DataFrame vacío")
                 return
                 
-            print(f"DEBUG: Columnas encontradas: {df.columns.tolist()}")
-            
             df.columns = df.columns.str.strip()
             
-            # Limpiar filas donde 'Factura' sea nulo
             if 'Factura' in df.columns:
                 df = df.dropna(subset=['Factura'])
                 df = df.drop_duplicates(subset=['Factura'])
-                
-                # Invertir el orden (más nuevos arriba)
                 df = df.iloc[::-1]
                 
-                print(f"DEBUG: Procesando {len(df)} filas")
-                
-                # Limpiar tabla existente
                 self.table_pedidos.clear()
-
-                # Agregar filas
+                
                 for idx, row in df.iterrows():
                     factura = str(row.get('Factura', '')).strip()
                     if factura == 'nan' or not factura:
@@ -607,7 +681,6 @@ class App(ctk.CTk):
                     total = row.get('Total', '')
                     moneda = str(row.get('Moneda', '')).strip()
                     
-                    # Formatear el importe numérico con separador de miles y decimal
                     if pd.notna(total):
                         try:
                             total_val = float(total)
@@ -616,10 +689,8 @@ class App(ctk.CTk):
                             
                             if isinstance(total_val, (int, float)):
                                 if 'gs' in moneda.lower() or 'guaranies' in moneda.lower():
-                                    # Guaraníes no lleva decimales
                                     monto = f"{int(total_val):,}".replace(",", ".") + f" {moneda}"
                                 else:
-                                    # Dólares lleva 2 decimales
                                     if total_val == int(total_val):
                                         monto = f"{int(total_val):,}".replace(",", ".") + f",00 {moneda}"
                                     else:
@@ -629,8 +700,7 @@ class App(ctk.CTk):
                                         monto = f"{thousands},{decimals} {moneda}"
                             else:
                                 monto = f"{total_val} {moneda}"
-                        except Exception as e:
-                            print(f"DEBUG: Error formateando monto: {e}")
+                        except Exception:
                             monto = f"{total} {moneda}"
                     else:
                         monto = f"{moneda}" if moneda else ""
@@ -638,17 +708,24 @@ class App(ctk.CTk):
                     estado = str(row.get('EstadoTransaccion', '')).strip()
                     
                     self.table_pedidos.add_row([factura, vendedor, cliente, monto, estado])
+                    
+                    if self.table_pedidos.get_row_count() % 50 == 0:
+                        self.update_idletasks()
                 
-                # Forzar un único re-layout al finalizar
+                pedidos_count = self.table_pedidos.get_row_count()
+                self.lbl_pedidos_count.configure(text=f"{pedidos_count} pedidos")
                 self.update_idletasks()
-                print(f"DEBUG: Tabla actualizada con {len(self.table_pedidos.rows)} filas")
-            else:
-                print("DEBUG: No se encontró la columna 'Factura'")
+                
+                # Forzar redimensión de columnas
+                self.table_pedidos._do_resize()
+                
+                # Scroll hacia arriba después de cargar los datos
+                self.table_pedidos.scroll_to_top()
                 
         except Exception as e:
-            print(f"Error al cargar excel en tabla: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error al cargar excel: {e}")
+        finally:
+            self._loading_data = False
 
 
 if __name__ == "__main__":
