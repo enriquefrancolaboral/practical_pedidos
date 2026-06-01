@@ -1,0 +1,278 @@
+# Especificación de Requerimientos – PRACTICAL PEDIDOS
+
+## 1. Gestión de credenciales
+
+### RF-01. Configuración inicial
+
+La primera vez que se ejecute el sistema, deberá solicitar al usuario las credenciales de acceso a NODO (usuario y contraseña).
+
+### RF-02. Validación de credenciales
+
+Al guardar las credenciales, el sistema deberá realizar una prueba de conexión a NODO.
+
+### RF-03. Error de autenticación
+
+Si las credenciales proporcionadas son inválidas o no es posible conectarse a NODO, el sistema deberá informar claramente el motivo al usuario y no iniciar el proceso de sincronización.
+
+### RF-04. Persistencia de credenciales
+
+Las credenciales válidas deberán almacenarse de forma segura para que no sea necesario ingresarlas nuevamente en futuras ejecuciones.
+
+---
+
+## 2. Sincronización automática
+
+### RF-05. Descarga inicial
+
+Al iniciar el sistema, éste deberá descargar automáticamente el informe de pedidos desde NODO.
+
+### RF-06. Almacenamiento temporal
+
+La información descargada deberá mantenerse en memoria para poder compararse con futuras sincronizaciones.
+
+### RF-07. Sincronización programada
+
+El sistema deberá realizar verificaciones automáticas cada 5 minutos exactos de reloj.
+
+Ejemplo:
+
+* 06:00
+* 06:05
+* 06:10
+* 06:15
+* 06:20
+
+No deberá utilizar intervalos relativos desde la hora de inicio del programa.
+
+### RF-08. Sincronización al reabrir la aplicación
+
+Si la aplicación fue cerrada y posteriormente abierta nuevamente, deberá ejecutar una sincronización inmediata al iniciar.
+
+### RF-09. Operación automática
+
+La sincronización deberá ejecutarse de forma completamente automática, sin requerir botones de "Iniciar", "Detener", "Sincronizar" o "Pausar".
+
+---
+
+## 3. Gestión de datos
+
+### RF-10. Orden de visualización
+
+El informe descargado desde NODO se encuentra ordenado cronológicamente desde el pedido más antiguo hasta el más reciente.
+
+La interfaz deberá mostrar los registros en orden inverso, colocando los pedidos más recientes en la parte superior de la tabla.
+
+### RF-11. Actualización de registros
+
+Durante cada sincronización el sistema deberá:
+
+* Agregar nuevos pedidos detectados.
+* Actualizar pedidos existentes si alguno de sus datos cambió.
+* Eliminar de memoria los registros que ya no existan en el informe más reciente.
+
+### RF-12. Identificación visual de nuevos pedidos
+
+Los pedidos detectados como nuevos deberán mostrarse:
+
+* En color verde.
+* Con la etiqueta `[New]` junto al número de factura.
+
+Ejemplo:
+
+```text
+001-001-0006555 [New]
+```
+
+### RF-13. Apertura de la aplicación
+
+Cuando la aplicación se inicia después de haber estado cerrada, la actualización de la tabla deberá ser únicamente visual.
+
+En este caso los registros nuevos podrán marcarse como `[New]`, pero no deberán generar alertas ni mensajes de voz.
+
+---
+
+## 4. Alertas de nuevos pedidos
+
+### RF-14. Detección de nuevos pedidos durante la ejecución
+
+Si la aplicación ya se encontraba abierta y una sincronización periódica detecta nuevos pedidos, el sistema deberá generar una notificación por cada pedido nuevo encontrado.
+
+### RF-15. Alerta sonora
+
+El sistema deberá poder emitir una alerta sonora para cada nuevo pedido detectado.
+
+### RF-16. Mensaje hablado
+
+El sistema deberá reproducir mediante síntesis de voz el siguiente mensaje:
+
+> El vendedor [Nombre del vendedor] ha cargado un pedido para [Nombre del cliente].
+
+Ejemplo:
+
+> El vendedor Juan Pérez ha cargado un pedido para Comercial San José.
+
+### RF-17. Un mensaje por pedido
+
+Cuando se detecten múltiples pedidos nuevos, el sistema deberá generar una notificación independiente para cada pedido.
+
+---
+
+## 5. Configuración de alertas
+
+### RF-18. Control de alerta sonora
+
+La emisión de alertas sonoras dependerá exclusivamente del estado del checkbox "Sonido de notificación".
+
+* Activado: reproducir sonido.
+* Desactivado: no reproducir sonido.
+
+### RF-19. Control de lectura de mensajes
+
+La reproducción de mensajes por voz dependerá exclusivamente del estado del checkbox "Lectura de mensajes".
+
+* Activado: leer el mensaje correspondiente.
+* Desactivado: no leer ningún mensaje.
+
+### RF-20. Funcionamiento independiente
+
+Los controles de sonido y lectura deberán funcionar de forma independiente.
+
+Ejemplos:
+
+| Sonido | Lectura | Resultado                |
+| ------ | ------- | ------------------------ |
+| ON     | OFF     | Sólo sonido              |
+| OFF    | ON      | Sólo mensaje hablado     |
+| ON     | ON      | Sonido + mensaje hablado |
+| OFF    | OFF     | Sin alertas              |
+
+---
+
+### RF-21. Persistencia del estado conocido
+
+El sistema deberá guardar localmente el último conjunto de pedidos conocido para poder diferenciar entre:
+
+* Pedidos existentes antes de cerrar la aplicación.
+* Pedidos realmente nuevos recibidos mientras la aplicación estaba abierta.
+
+De esta forma se evita que, al abrir el programa, todos los pedidos recientes sean interpretados erróneamente como nuevos y generen alertas.
+
+### RF-22. Identificador único
+
+El sistema deberá considerar el campo Factura como identificador único del pedido.
+
+### RF-23. Cambio de datos en pedidos existentes
+
+Si una factura ya existe pero alguno de los siguientes campos cambia:
+
+Cliente
+Vendedor
+Monto
+Estado
+
+el pedido deberá actualizarse en memoria sin ser considerado un pedido nuevo.
+
+### RF-24. Eliminación de duplicados
+
+Durante cada sincronización el sistema deberá conservar únicamente un registro por número de factura.
+
+### RF-25. Duración de la marca [New]
+
+La etiqueta [New] deberá mostrarse únicamente hasta la siguiente sincronización exitosa.
+
+### RF-26. Error temporal de conexión
+
+Si una sincronización falla por problemas de red o disponibilidad de NODO:
+
+Se conservarán los datos actuales.
+No se eliminarán registros.
+Se registrará el error.
+El sistema volverá a intentar la sincronización en el siguiente ciclo programado.
+
+### RF-27. Última sincronización
+
+La interfaz deberá mostrar:
+
+Fecha y hora de la última sincronización exitosa.
+Estado actual de conexión.
+
+Ejemplo:
+
+Última sincronización: 01/06/2026 10:35
+Estado: Conectado
+
+### RF-28. Alerta única
+
+Cada pedido deberá generar alertas sonoras y/o de voz una sola vez.
+
+Aunque el pedido continúe apareciendo en sincronizaciones posteriores, no deberá volver a notificarse.
+
+### RF-29. Funcionamiento en segundo plano
+
+La aplicación deberá poder permanecer abierta minimizada sin interrumpir las sincronizaciones programadas.
+
+### RF-30. Bitácora de eventos
+
+El sistema deberá registrar:
+
+Inicio de aplicación.
+Sincronizaciones exitosas.
+Errores de conexión.
+Errores de autenticación.
+Pedidos nuevos detectados.
+
+### RF-31. Cierre seguro
+
+Al cerrar la aplicación:
+
+Se detendrán los procesos en segundo plano.
+Se guardará el estado actual de los pedidos.
+No deberán quedar procesos huérfanos ejecutándose.
+
+### RF-32. Persistencia de pedidos conocidos
+
+El sistema deberá guardar localmente el último estado sincronizado.
+
+Cuando la aplicación vuelva a abrirse:
+
+Comparará el informe descargado con el último estado guardado.
+Actualizará visualmente los cambios.
+No emitirá alertas por pedidos que llegaron mientras la aplicación estuvo cerrada.
+
+Esto evita el problema clásico de abrir el programa por la mañana y recibir 50 alertas de pedidos que en realidad fueron cargados durante la noche.
+
+### RF-33. Manejo temporal del archivo descargado
+
+El informe descargado desde NODO en formato .xlsx deberá utilizarse únicamente como archivo temporal de procesamiento.
+
+Durante cada sincronización o verificación:
+
+El sistema descargará el archivo .xlsx desde NODO.
+El sistema leerá y procesará su contenido.
+Los datos necesarios se almacenarán únicamente en memoria y/o en la estructura persistente de estado definida por la aplicación.
+Una vez finalizada exitosamente la comparación y actualización de los datos, el archivo .xlsx descargado deberá eliminarse automáticamente.
+No deberán acumularse archivos Excel históricos en el equipo del usuario.
+En caso de error durante la sincronización, el sistema deberá intentar eliminar igualmente el archivo temporal antes de finalizar el proceso.
+Como máximo podrá existir un único archivo temporal de descarga durante la ejecución de una sincronización.
+Objetivo
+
+Evitar:
+
+Acumulación de archivos innecesarios.
+Consumo excesivo de espacio en disco.
+Lectura accidental de informes antiguos.
+Problemas derivados de múltiples versiones del mismo reporte.
+Consideración técnica recomendada
+
+Idealmente el archivo ni siquiera debería guardarse en la carpeta principal de la aplicación.
+
+Se recomienda:
+
+temp/
+└── nodo_report.xlsx
+
+o utilizar directamente:
+
+tempfile.NamedTemporaryFile()
+
+para que el archivo sea completamente temporal y se elimine automáticamente al finalizar el procesamiento.
