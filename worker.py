@@ -4,7 +4,7 @@ import time
 import subprocess
 from sync_main import run_sincronizar
 
-MONITOR_HOST     = "app.digipwms.com"
+MONITOR_HOST     = "nodo-practical.nodosolutions.com"
 MONITOR_INTERVAL = 1
 TIMEOUT_REQUEST  = 5
 
@@ -75,21 +75,19 @@ class SyncWorker:
             self._log("__DONE__")
 
     def _monitor_red(self):
+        import socket
         while self._thread is not None and self._thread.is_alive():
             if self._reset_event.is_set():
                 break
             try:
                 t = time.time()
-                result = subprocess.run(
-                    ["ping", "-n", "1", "-w", "3000", MONITOR_HOST],
-                    capture_output=True, text=True, timeout=TIMEOUT_REQUEST,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
+                # Realizar un handshake socket rápido en puerto HTTPS (443)
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect((MONITOR_HOST, 443))
+                s.close()
                 latencia_ms = int((time.time() - t) * 1000)
-                if result.returncode == 0:
-                    self.latency_queue.put(("ok", latencia_ms))
-                else:
-                    self.latency_queue.put(("sin_conexion", None))
+                self.latency_queue.put(("ok", latencia_ms))
             except Exception:
                 self.latency_queue.put(("sin_conexion", None))
             time.sleep(MONITOR_INTERVAL)
