@@ -7,23 +7,22 @@ import pandas as pd
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# Fecha base fija para ordenamiento cuando el Excel no tiene columna Fecha.
+# Pedidos con índice mayor → fecha más reciente → aparecen primero en la UI.
+_FECHA_BASE = datetime(2000, 1, 1)
+
 
 class ServicioNodo:
     """Conexión con el sistema NODO para sincronizar pedidos"""
-    
+
     def __init__(self, credenciales: Credenciales, log_fn: Optional[Callable] = None):
         self.credenciales = credenciales
         self.log = log_fn or print
         self._stop_event = Event()
         self._reset_event = Event()
-        
-    def _get_root_dir(self):
-        """Obtiene el directorio raíz del proyecto"""
-        if getattr(sys, 'frozen', False):
-            return os.path.dirname(os.path.abspath(sys.executable))
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
+
     def _login_nodo(self, page) -> bool:
         """Autentica en NODO y valida si las credenciales son correctas."""
         try:
@@ -34,21 +33,20 @@ class ServicioNodo:
             page.fill("#txtClave", self.credenciales.password)
             page.evaluate("document.getElementById('chkMantenerSesion').click()")
             page.click("button[type='submit']")
-            
-            # Esperar a que la página cargue después del login
             page.wait_for_load_state("networkidle", timeout=10000)
-            
-            # --- VALIDACIÓN DE ERRORES ---
-            # Buscar mensajes de error en la página actual
-            error_usuario = page.query_selector(".alert.alert-danger:has-text('No se ha encontrado un usuario registrado')")
-            error_pass = page.query_selector(".alert.alert-danger:has-text('La contraseña ingresada es incorrecta')")
-            
+
+            error_usuario = page.query_selector(
+                ".alert.alert-danger:has-text('No se ha encontrado un usuario registrado')"
+            )
+            error_pass = page.query_selector(
+                ".alert.alert-danger:has-text('La contraseña ingresada es incorrecta')"
+            )
+
             if error_usuario or error_pass:
                 mensaje = "Usuario no encontrado" if error_usuario else "Contraseña incorrecta"
                 self.log(f"[AUTH] Error de autenticación: {mensaje}")
                 return False
-                
-            # Verificar si redirigió a una página de dashboard o similar
+
             if "Login" in page.title() or page.url == self.credenciales.servidor:
                 self.log("[AUTH] Credenciales inválidas, se mantuvo en página de login.")
                 return False
@@ -58,126 +56,117 @@ class ServicioNodo:
         except Exception as e:
             self.log(f"[AUTH] Error durante el proceso de login: {e}")
             return False
-    
+
     def sincronizar_pedidos(self) -> Dict[str, Any]:
         """Sincroniza pedidos desde NODO usando un archivo temporal."""
-        resultado = {"exito": False, "mensaje": "", "archivo": None, "pedidos": None}
+        resultado = {"exito": False, "mensaje": "", "pedidos": None}
         temp_path = None
-        
+
         with sync_playwright() as p:
-            # Usar headless=True para producción, False para debug
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
-            
+
             try:
-                # Login
                 if not self._login_nodo(page):
                     resultado["mensaje"] = "Error de autenticación. Verifique usuario/contraseña."
                     return resultado
-                
+
                 self.log("[PEDIDOS] Navegando a Libro de Ventas...")
                 page.goto(f"{self.credenciales.servidor}/LibroVenta/Index", timeout=45000)
                 page.wait_for_load_state("networkidle")
-                
-                # Aplicar filtros
+
                 self.log("[PEDIDOS] Aplicando filtros...")
-                page.select_option("#cboConcepto", "4")  # Pedido
+                page.select_option("#cboConcepto", "4")
                 page.evaluate("$('#cboConcepto').trigger('change')")
-                page.select_option("#cboConsolidado", "1")  # Sí
-                
-                # Consultar
+                page.select_option("#cboConsolidado", "1")
+
                 self.log("[PEDIDOS] Ejecutando consulta...")
                 page.click("#btnBuscar")
                 page.wait_for_load_state("networkidle")
-                
-                # --- USAR ARCHIVO TEMPORAL ---
-                # Crear archivo temporal con sufijo .xlsx
+
                 with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp_file:
                     temp_path = tmp_file.name
-                    self.log(f"[PEDIDOS] Archivo temporal creado: {temp_path}")
-                
-                # Descargar el archivo
-                self.log("[PEDIDOS] Descargando reporte de pedidos...")
+                    self.log(f"[PEDIDOS] Archivo temporal: {temp_path}")
+
+                self.log("[PEDIDOS] Descargando reporte...")
                 with page.expect_download(timeout=60000) as dl:
                     page.click("#btnDownloadExcel")
-                download = dl.value
-                download.save_as(temp_path)  # Guardar en el archivo temporal
+                dl.value.save_as(temp_path)
                 self.log("[PEDIDOS] Descarga completada")
-                
-                # Leer el archivo temporal con pandas
+
                 self.log("[PEDIDOS] Procesando datos...")
                 df = pd.read_excel(temp_path)
-                
-                # Procesar el DataFrame para crear los objetos Pedido
+                tiene_fecha = 'Fecha' in df.columns
+
                 pedidos = []
-                for _, row in df.iterrows():
-                    # Intentar obtener la fecha del pedido si existe, sino usar datetime.now()
-                    fecha_pedido = datetime.now()
-                    try:
-                        if 'Fecha' in df.columns and pd.notna(row.get('Fecha')):
-                            fecha_pedido = pd.to_datetime(row.get('Fecha'))
-                    except:
-                        pass
-                    
+                for idx, (_, row) in enumerate(df.iterrows()):
+                    # --- CORRECCIÓN RF-10 ---
+                    # Si el Excel tiene columna Fecha real, usarla.
+                    # Si no, asignar fechas incrementales desde una base fija para que
+                    # el índice de fila determine el orden (más alto = más reciente).
+                    fecha_pedido = _FECHA_BASE + timedelta(seconds=idx)
+                    if tiene_fecha and pd.notna(row.get('Fecha')):
+                        try:
+                            fecha_pedido = pd.to_datetime(row['Fecha']).to_pydatetime()
+                        except Exception:
+                            pass  # Mantener el valor incremental como fallback
+
                     pedido = Pedido(
                         numero_pedido=str(row.get('Factura', '')),
                         fecha=fecha_pedido,
                         estado=str(row.get('EstadoTransaccion', '')),
-                        total=float(row.get('Total', 0)) if pd.notna(row.get('Total')) else 0,
+                        total=float(row.get('Total', 0)) if pd.notna(row.get('Total')) else 0.0,
                         cliente=str(row.get('Cliente', '')),
                         vendedor=str(row.get('Vendedor', '')),
-                        moneda=str(row.get('Moneda', '')) if pd.notna(row.get('Moneda')) else ""
+                        moneda=str(row.get('Moneda', '')) if pd.notna(row.get('Moneda')) else "",
                     )
                     pedidos.append(pedido)
-                
-                # INVERTIR EL ORDEN: los pedidos más nuevos (últimos en el Excel) aparecerán primero
-                # Esto cumple con RF-10
-                pedidos.reverse()
+
+                # NO invertir aquí: _actualizar_tabla en app.py ordena por fecha desc.
                 self.log(f"[PEDIDOS] Procesados {len(pedidos)} pedidos")
-                
+
                 resultado["exito"] = True
                 resultado["mensaje"] = "Descarga y procesamiento exitoso"
                 resultado["pedidos"] = pedidos
-                
+
             except Exception as e:
                 resultado["mensaje"] = f"Error: {str(e)}"
                 self.log(f"[ERROR] {e}")
             finally:
-                # --- LIMPIEZA DEL ARCHIVO TEMPORAL (RF-33) ---
+                # RF-33: eliminar archivo temporal siempre
                 if temp_path and os.path.exists(temp_path):
                     try:
                         os.unlink(temp_path)
-                        self.log("[LIMPIAR] Archivo temporal eliminado correctamente.")
+                        self.log("[LIMPIAR] Archivo temporal eliminado.")
                     except Exception as e:
                         self.log(f"[LIMPIAR] Error al eliminar archivo temporal: {e}")
-                
-                # Cerrar el navegador
+
                 context.close()
                 browser.close()
                 self.log("[PEDIDOS] Navegador cerrado")
-        
+
         return resultado
-    
+
     def probar_conexion(self) -> Dict[str, Any]:
-        """Prueba de conexión para verificar credenciales sin descargar datos"""
+        """Prueba de conexión sin descargar datos."""
         resultado = {"exito": False, "mensaje": ""}
-        
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
-            
+
             try:
-                if not self._login_nodo(page):
-                    resultado["mensaje"] = "Error de autenticación. Verifique usuario/contraseña."
-                else:
+                if self._login_nodo(page):
                     resultado["exito"] = True
                     resultado["mensaje"] = "Conexión exitosa"
+                else:
+                    resultado["mensaje"] = "Error de autenticación. Verifique usuario/contraseña."
             except Exception as e:
                 resultado["mensaje"] = f"Error de conexión: {str(e)}"
             finally:
                 context.close()
                 browser.close()
-        
+
         return resultado
