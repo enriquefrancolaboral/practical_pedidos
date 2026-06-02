@@ -1,11 +1,12 @@
 # core/estado_pedidos.py
 import json
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 from datetime import datetime
 from .modelos import Pedido
 
-ARCHIVO_ESTADO = "ultimo_estado_conocido.json"
+ARCHIVO_ESTADO    = "ultimo_estado_conocido.json"
+ARCHIVO_ALERTADOS = "pedidos_alertados.json"
 
 
 class GestorEstadoPedidos:
@@ -14,16 +15,18 @@ class GestorEstadoPedidos:
     def __init__(self, log_fn=None):
         self.log = log_fn or print
         self.estado_actual: Dict[str, Pedido] = {}
+        self.pedidos_alertados: Set[str] = set()
         self._cargar_estado_guardado()
+        self._cargar_alertados()
 
-    def _get_ruta_estado(self) -> str:
+    def _get_ruta(self, archivo: str) -> str:
         app_dir = os.path.join(os.environ.get('APPDATA', '.'), 'PracticalPedidos')
         os.makedirs(app_dir, exist_ok=True)
-        return os.path.join(app_dir, ARCHIVO_ESTADO)
+        return os.path.join(app_dir, archivo)
 
     def _cargar_estado_guardado(self):
         try:
-            with open(self._get_ruta_estado(), 'r', encoding='utf-8') as f:
+            with open(self._get_ruta(ARCHIVO_ESTADO), 'r', encoding='utf-8') as f:
                 datos_guardados = json.load(f)
                 for num_pedido, datos in datos_guardados.items():
                     self.estado_actual[num_pedido] = Pedido(
@@ -42,6 +45,26 @@ class GestorEstadoPedidos:
         except Exception as e:
             self.log(f"[ESTADO] Error al cargar estado: {e}")
 
+    def _cargar_alertados(self):
+        try:
+            with open(self._get_ruta(ARCHIVO_ALERTADOS), 'r', encoding='utf-8') as f:
+                self.pedidos_alertados = set(json.load(f))
+            self.log(f"[ESTADO] {len(self.pedidos_alertados)} pedido(s) alertados cargados.")
+        except FileNotFoundError:
+            self.pedidos_alertados = set()
+        except Exception as e:
+            self.log(f"[ESTADO] Error al cargar alertados: {e}")
+            self.pedidos_alertados = set()
+
+    def marcar_como_alertado(self, numero_pedido: str):
+        """Registra que un pedido ya fue alertado/leído y persiste el set."""
+        self.pedidos_alertados.add(numero_pedido)
+        try:
+            with open(self._get_ruta(ARCHIVO_ALERTADOS), 'w', encoding='utf-8') as f:
+                json.dump(list(self.pedidos_alertados), f, ensure_ascii=False)
+        except Exception as e:
+            self.log(f"[ESTADO] Error al guardar alertados: {e}")
+
     def guardar_estado_actual(self):
         datos_a_guardar = {}
         for num_pedido, pedido in self.estado_actual.items():
@@ -50,7 +73,7 @@ class GestorEstadoPedidos:
             datos_a_guardar[num_pedido] = d
 
         try:
-            with open(self._get_ruta_estado(), 'w', encoding='utf-8') as f:
+            with open(self._get_ruta(ARCHIVO_ESTADO), 'w', encoding='utf-8') as f:
                 json.dump(datos_a_guardar, f, indent=4, ensure_ascii=False)
             self.log("[ESTADO] Estado actual guardado correctamente.")
         except Exception as e:
@@ -60,14 +83,6 @@ class GestorEstadoPedidos:
         self,
         pedidos_nuevos_desde_nodo: List[Pedido],
     ) -> Tuple[List[Pedido], List[Pedido], Dict[str, Pedido]]:
-        """
-        Compara la lista nueva con el estado actual.
-
-        Retorna:
-            nuevos_pedidos       – pedidos que no existían antes (para alertar).
-            pedidos_modificados  – pedidos nuevos o con datos cambiados (para UI).
-            nuevo_estado         – estado completo actualizado (todos los pedidos).
-        """
         nuevos_pedidos: List[Pedido] = []
         pedidos_modificados: List[Pedido] = []
         cambios = {"actualizados": [], "eliminados": []}
@@ -100,6 +115,8 @@ class GestorEstadoPedidos:
         for num_pedido in self.estado_actual:
             if num_pedido not in pedidos_nodos_dict:
                 cambios["eliminados"].append(num_pedido)
+                # Limpiar del set si ya no existe el pedido
+                self.pedidos_alertados.discard(num_pedido)
 
         if cambios["actualizados"]:
             self.log(f"[ESTADO] Cambios: {cambios['actualizados']}")

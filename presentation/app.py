@@ -7,8 +7,11 @@ from tkinter import ttk
 import threading
 import os
 import sys
+import json
 from datetime import datetime
 from threading import Timer
+
+PREFS_PATH = os.path.join(os.environ.get('APPDATA', '.'), 'PracticalPedidos', 'preferencias.json')
 
 from data.repositorio_pedidos import RepositorioPedidos
 from data.servicio_nodo import ServicioNodo
@@ -58,7 +61,6 @@ class App(ctk.CTk):
         self.minsize(900, 600)
         self.configure(fg_color=COLOR_BG)
 
-        # --- CORRECCIÓN #1: estado_conexion inicializado ---
         self.estado_conexion = "Iniciando..."
 
         self.repositorio = RepositorioPedidos()
@@ -68,20 +70,27 @@ class App(ctk.CTk):
         self.ultima_sincronizacion: datetime = None
         self.primera_sincronizacion = True
 
+        # Cargar preferencias antes de construir la UI
+        self._prefs = self._cargar_preferencias()
+
         self._build_ui()
         self._verificar_credenciales()
 
         # RF-30: registrar inicio
         self._log("[APP] Aplicación iniciada.")
 
-        self.after(500, self._ejecutar_sincronizacion)
+        # Mostrar datos guardados inmediatamente (sin red)
+        self._cargar_tabla_desde_estado_guardado()
+
+        # Lanzar sincronización en hilo separado para no bloquear la UI
+        self.after(200, self._lanzar_sincronizacion_en_hilo)
+
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     # ------------------------------------------------------------------
     # Logging centralizado (RF-30)
     # ------------------------------------------------------------------
     def _log(self, mensaje: str):
-        """Registra en archivo y consola."""
         log_archivo(mensaje)
 
     # ------------------------------------------------------------------
@@ -111,7 +120,7 @@ class App(ctk.CTk):
                      font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM
                      ).pack(padx=18, pady=(0, 24), anchor="w")
 
-        self.check_sonido_var = ctk.StringVar(value="off")
+        self.check_sonido_var = ctk.StringVar(value=self._prefs.get("sonido", "off"))
         self.check_sonido = ctk.CTkCheckBox(
             left, text="Sonido de notificación", font=FONT_LABEL, text_color=COLOR_TEXT,
             variable=self.check_sonido_var, onvalue="on", offvalue="off",
@@ -119,7 +128,7 @@ class App(ctk.CTk):
         )
         self.check_sonido.pack(padx=18, pady=(0, 16), anchor="w")
 
-        self.check_lectura_var = ctk.StringVar(value="off")
+        self.check_lectura_var = ctk.StringVar(value=self._prefs.get("lectura", "off"))
         self.check_lectura = ctk.CTkCheckBox(
             left, text="Lectura de mensajes", font=FONT_LABEL, text_color=COLOR_TEXT,
             variable=self.check_lectura_var, onvalue="on", offvalue="off",
@@ -178,15 +187,55 @@ class App(ctk.CTk):
         self.table_pedidos.grid(row=1, column=0, sticky="nsew")
 
     # ------------------------------------------------------------------
+    # Persistencia de preferencias
+    # ------------------------------------------------------------------
+    def _cargar_preferencias(self) -> dict:
+        try:
+            with open(PREFS_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _guardar_preferencias(self):
+        try:
+            os.makedirs(os.path.dirname(PREFS_PATH), exist_ok=True)
+            with open(PREFS_PATH, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "sonido":  self.check_sonido_var.get(),
+                    "lectura": self.check_lectura_var.get(),
+                }, f)
+        except Exception as e:
+            self._log(f"[PREFS] Error al guardar preferencias: {e}")
+
+    # ------------------------------------------------------------------
+    # Carga inmediata desde estado guardado (sin red)
+    # ------------------------------------------------------------------
+    def _cargar_tabla_desde_estado_guardado(self):
+        """Muestra los datos del JSON local inmediatamente al iniciar (RF-32)."""
+        estado = self.gestor_estado.estado_actual
+        if estado:
+            self._actualizar_tabla([], estado, [])
+            self._log(f"[APP] Estado previo cargado en UI: {len(estado)} pedidos.")
+        else:
+            self._log("[APP] Sin estado previo guardado.")
+
+    # ------------------------------------------------------------------
+    # Lanzador de sincronización en hilo separado
+    # ------------------------------------------------------------------
+    def _lanzar_sincronizacion_en_hilo(self):
+        """Lanza la sincronización en un hilo background para no bloquear la UI."""
+        threading.Thread(target=self._ejecutar_sincronizacion, daemon=True).start()
+
+    # ------------------------------------------------------------------
     # Callbacks de checkboxes
     # ------------------------------------------------------------------
     def _on_check_sonido(self):
         if self.check_sonido_var.get() == "on":
             self._log("[CONFIG] Sonido activado - reproduciendo prueba.")
-            # --- CORRECCIÓN #2: usar alerta_sonora() en lugar de winsound ---
             threading.Thread(target=alerta_sonora, daemon=True).start()
         else:
             self._log("[CONFIG] Sonido desactivado.")
+        self._guardar_preferencias()
 
     def _on_check_lectura(self):
         if self.check_lectura_var.get() == "on":
@@ -194,6 +243,7 @@ class App(ctk.CTk):
             reproducir_texto("La lectura de mensajes está activada")
         else:
             self._log("[CONFIG] Lectura desactivada.")
+        self._guardar_preferencias()
 
     # ------------------------------------------------------------------
     # Credenciales
@@ -203,7 +253,7 @@ class App(ctk.CTk):
 
     def _on_credenciales_guardadas(self):
         self.lbl_footer.configure(text="Credenciales guardadas correctamente.")
-        self.after(1000, self._ejecutar_sincronizacion)
+        self.after(1000, self._lanzar_sincronizacion_en_hilo)
 
     # ------------------------------------------------------------------
     # Sincronización (RF-07, RF-08, RF-09)
@@ -214,44 +264,39 @@ class App(ctk.CTk):
         minutos_faltantes = (5 - (ahora.minute % 5)) % 5
         segundos_faltantes = minutos_faltantes * 60 - ahora.second
 
-        # Si ya estamos exactamente en un múltiplo de 5, esperar 5 min más
         if segundos_faltantes <= 0:
             segundos_faltantes += 300
 
         self.log_ui(f"Próxima sincronización en {segundos_faltantes}s.")
-        self.timer_proximo = Timer(segundos_faltantes, self._ejecutar_sincronizacion_en_hilo)
+        self.timer_proximo = Timer(segundos_faltantes, self._lanzar_sincronizacion_en_hilo)
         self.timer_proximo.daemon = True
         self.timer_proximo.start()
 
-    def _ejecutar_sincronizacion_en_hilo(self):
+    def _ejecutar_sincronizacion(self):
+        """Corre enteramente en un hilo background. Actualiza UI via self.after()."""
         if self.sync_en_progreso:
             self._log("[SYNC] Sincronización previa en progreso. Omitiendo.")
             self._programar_proxima_sincronizacion()
             return
-        self.after(0, self._ejecutar_sincronizacion)
-
-    def _ejecutar_sincronizacion(self):
-        if self.sync_en_progreso:
-            return
 
         if not credenciales_configuradas():
-            self.lbl_footer.configure(text="⚠ Credenciales no configuradas.")
+            self.after(0, lambda: self.lbl_footer.configure(text="⚠ Credenciales no configuradas."))
             self.estado_conexion = "Error: Sin credenciales"
-            self._actualizar_ui_estado()
+            self.after(0, self._actualizar_ui_estado)
             self._programar_proxima_sincronizacion()
             return
 
         self.sync_en_progreso = True
         self.estado_conexion = "Conectando..."
-        self._actualizar_ui_estado()
-        self.log_ui("Iniciando sincronización...")
+        self.after(0, self._actualizar_ui_estado)
+        self.after(0, lambda: self.log_ui("Iniciando sincronización..."))
 
         try:
             user, pwd = cargar_credenciales(self._log)
             if not user or not pwd:
                 self.estado_conexion = "Error: Credenciales inválidas"
-                self.log_ui("Error: Credenciales inválidas.")
-                self._log("[AUTH] Error de autenticación: credenciales inválidas.")  # RF-30
+                self.after(0, lambda: self.log_ui("Error: Credenciales inválidas."))
+                self._log("[AUTH] Error de autenticación: credenciales inválidas.")
                 return
 
             credenciales = Credenciales(usuario=user, password=pwd)
@@ -266,38 +311,40 @@ class App(ctk.CTk):
                 nuevos, modificados, nuevo_estado = \
                     self.gestor_estado.sincronizar_y_detectar_nuevos(pedidos_desde_nodo)
 
-                self._actualizar_tabla(modificados, nuevo_estado, nuevos)
+                # Actualizar tabla en el hilo principal
+                self.after(0, lambda: self._actualizar_tabla(modificados, nuevo_estado, nuevos))
 
                 # RF-13: no alertar en la primera sincronización
                 if not self.primera_sincronizacion:
-                    for pedido in nuevos:
-                        self._generar_alerta_pedido_nuevo(pedido)
-                        self._log(f"[NUEVO PEDIDO] {pedido.numero_pedido} - {pedido.vendedor} → {pedido.cliente}")  # RF-30
+                    if nuevos:
+                        for p in nuevos:
+                            self._log(f"[NUEVO PEDIDO] {p.numero_pedido} - {p.vendedor} → {p.cliente}")
+                        self._generar_alertas_secuenciales(nuevos)
                 else:
                     if nuevos:
                         self._log(f"[INFO] {len(nuevos)} pedido(s) nuevos encontrados al iniciar (sin alertas por RF-13).")
 
                 self.gestor_estado.guardar_estado_actual()
                 msg = f"Sincronización exitosa - {len(nuevos)} nuevo(s), {len(modificados)} modificado(s)"
-                self.log_ui(msg)
-                self._log(f"[SYNC] {msg}")  # RF-30
+                self.after(0, lambda: self.log_ui(msg))
+                self._log(f"[SYNC] {msg}")
 
                 if self.primera_sincronizacion:
                     self.primera_sincronizacion = False
 
             else:
                 self.estado_conexion = "Error"
-                self.log_ui(f"Error: {resultado['mensaje']}")
-                self._log(f"[ERROR CONEXIÓN] {resultado['mensaje']}")  # RF-30
+                self.after(0, lambda: self.log_ui(f"Error: {resultado['mensaje']}"))
+                self._log(f"[ERROR CONEXIÓN] {resultado['mensaje']}")
 
         except Exception as e:
             self.estado_conexion = "Error"
-            self.log_ui(f"Error inesperado: {str(e)}")
-            self._log(f"[ERROR] {str(e)}")  # RF-30
+            self.after(0, lambda: self.log_ui(f"Error inesperado: {str(e)}"))
+            self._log(f"[ERROR] {str(e)}")
         finally:
             self.sync_en_progreso = False
-            self._actualizar_ui_estado()
-            self._programar_proxima_sincronizacion()  # RF-26: reprogramar siempre
+            self.after(0, self._actualizar_ui_estado)
+            self._programar_proxima_sincronizacion()
 
     # ------------------------------------------------------------------
     # Tabla
@@ -305,10 +352,9 @@ class App(ctk.CTk):
     def _actualizar_tabla(self, pedidos_modificados: list, todos: dict, nuevos: list):
         self.table_pedidos.clear()
 
-        # Ordenar por fecha desc (RF-10) — funciona correctamente gracias a la
-        # corrección en servicio_nodo.py que asigna fechas incrementales.
         pedidos_ordenados = sorted(todos.values(), key=lambda p: p.fecha, reverse=True)
         nuevos_numeros = {p.numero_pedido for p in nuevos}
+        alertados = self.gestor_estado.pedidos_alertados
 
         for pedido in pedidos_ordenados:
             monto = f"{int(pedido.total):,}".replace(",", ".")
@@ -318,6 +364,8 @@ class App(ctk.CTk):
             numero = pedido.numero_pedido
             if pedido.numero_pedido in nuevos_numeros:
                 numero = f"{numero} [New]"
+            elif pedido.numero_pedido in alertados:
+                numero = f"{numero} 🔊"
 
             self.table_pedidos.add_row([
                 numero, pedido.vendedor, pedido.cliente, monto, pedido.estado
@@ -326,18 +374,50 @@ class App(ctk.CTk):
         self.lbl_pedidos_count.configure(text=f"{len(pedidos_ordenados)} pedidos")
         self.table_pedidos.scroll_to_top()
 
+    def _refrescar_iconos_tabla(self):
+        """Redibuja la tabla para reflejar el 🔊 sin esperar la próxima sync."""
+        estado = self.gestor_estado.estado_actual
+        if estado:
+            self._actualizar_tabla([], estado, [])
+
     # ------------------------------------------------------------------
     # Alertas (RF-14 – RF-20, RF-28)
     # ------------------------------------------------------------------
+    def _generar_alertas_secuenciales(self, pedidos: list):
+        """Reproduce alertas una tras otra en un único hilo (evita solapamiento).
+        Marca cada pedido como alertado y refresca la tabla para mostrar 🔊."""
+        def cola():
+            for pedido in pedidos:
+                alerto = False
+                if self.check_sonido_var.get() == "on":
+                    alerta_sonora()
+                    alerto = True
+                if self.check_lectura_var.get() == "on":
+                    reproducir_texto(
+                        f"El vendedor {pedido.vendedor} ha cargado un pedido para {pedido.cliente}"
+                    )
+                    alerto = True
+                if alerto:
+                    self.gestor_estado.marcar_como_alertado(pedido.numero_pedido)
+                    # Refrescar tabla en hilo principal para mostrar 🔊 inmediatamente
+                    self.after(0, self._refrescar_iconos_tabla)
+        threading.Thread(target=cola, daemon=True).start()
+
     def _generar_alerta_pedido_nuevo(self, pedido):
+        """Mantiene compatibilidad para llamadas individuales."""
         def alertar():
+            alerto = False
             if self.check_sonido_var.get() == "on":
                 alerta_sonora()
+                alerto = True
             if self.check_lectura_var.get() == "on":
                 reproducir_texto(
                     f"El vendedor {pedido.vendedor} ha cargado un pedido para {pedido.cliente}"
                 )
-
+                alerto = True
+            if alerto:
+                self.gestor_estado.marcar_como_alertado(pedido.numero_pedido)
+                self.after(0, self._refrescar_iconos_tabla)
         threading.Thread(target=alertar, daemon=True).start()
 
     # ------------------------------------------------------------------
@@ -362,6 +442,7 @@ class App(ctk.CTk):
         self._log("[APP] Cerrando aplicación.")
         if self.timer_proximo:
             self.timer_proximo.cancel()
+        self._guardar_preferencias()
         self.gestor_estado.guardar_estado_actual()
         self.destroy()
         sys.exit(0)

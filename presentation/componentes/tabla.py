@@ -1,7 +1,6 @@
 import customtkinter as ctk
 from tkinter import ttk
 
-# Colores (deberían venir de un archivo de configuración)
 COLOR_BG = "#0e0e1a"
 COLOR_PANEL = "#13132b"
 COLOR_ACCENT = "#1a1a40"
@@ -30,18 +29,15 @@ class ModernTable(ctk.CTkFrame):
         self.headers = headers
         self.parent_frame = parent
         
-        # Frame contenedor principal
         self.table_container = ctk.CTkFrame(self, fg_color="transparent")
         self.table_container.pack(fill="both", expand=True)
         
-        # Scrollbar vertical solamente
         self.v_scrollbar = ttk.Scrollbar(
             self.table_container,
             orient="vertical"
         )
         self.v_scrollbar.pack(side="right", fill="y")
         
-        # Treeview sin scrollbar horizontal
         self.tree = ttk.Treeview(
             self.table_container,
             columns=headers,
@@ -53,12 +49,10 @@ class ModernTable(ctk.CTkFrame):
         self.v_scrollbar.config(command=self.tree.yview)
         self.tree.pack(side="left", fill="both", expand=True)
         
-        # Configurar columnas
         for idx, header in enumerate(headers):
             self.tree.heading(header, text=header)
-            # Anchos iniciales
-            if idx == 0:  # Factura
-                self.tree.column(header, width=140, minwidth=120, anchor="center")
+            if idx == 0:  # Factura — más ancho para [New] y 🔊
+                self.tree.column(header, width=210, minwidth=180, anchor="center")
             elif idx == 1:  # Vendedor
                 self.tree.column(header, width=160, minwidth=120, anchor="w")
             elif idx == 2:  # Cliente
@@ -68,7 +62,6 @@ class ModernTable(ctk.CTkFrame):
             elif idx == 4:  # Estado
                 self.tree.column(header, width=120, minwidth=100, anchor="center")
         
-        # Configurar estilos
         style = ttk.Style()
         style.theme_use("clam")
         
@@ -98,7 +91,6 @@ class ModernTable(ctk.CTkFrame):
         
         self.tree.configure(style="Excel.Treeview")
         
-        # Configurar tags
         self.tree.tag_configure("odd", background=COLOR_TABLE_ROW_ODD)
         self.tree.tag_configure("even", background=COLOR_TABLE_ROW_EVEN)
         self.tree.tag_configure("completed", foreground=COLOR_STATUS_OK)
@@ -107,7 +99,6 @@ class ModernTable(ctk.CTkFrame):
         
         self.row_counter = 0
         
-        # Bind para redimensionar
         self.bind("<Configure>", self._on_resize)
     
     def _on_resize(self, event):
@@ -121,14 +112,14 @@ class ModernTable(ctk.CTkFrame):
             return
         
         widths = [
-            int(total_width * 0.15),  # Factura
-            int(total_width * 0.18),  # Vendedor
-            int(total_width * 0.35),  # Cliente
+            int(total_width * 0.21),  # Factura  (era 0.15)
+            int(total_width * 0.17),  # Vendedor (era 0.18)
+            int(total_width * 0.32),  # Cliente  (era 0.35)
             int(total_width * 0.15),  # Monto
-            int(total_width * 0.17)   # Estado
+            int(total_width * 0.15),  # Estado   (era 0.17)
         ]
         
-        min_widths = [120, 120, 180, 100, 100]
+        min_widths = [180, 120, 180, 100, 100]
         for i in range(len(widths)):
             if widths[i] < min_widths[i]:
                 widths[i] = min_widths[i]
