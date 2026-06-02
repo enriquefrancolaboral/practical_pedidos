@@ -22,37 +22,38 @@ class ModernTable(ctk.CTkFrame):
     """Tabla con scrollbar moderna y minimalista."""
 
     def __init__(self, parent, headers, **kwargs):
-        super().__init__(parent, fg_color=COLOR_BG, corner_radius=0, **kwargs)
+        super().__init__(parent, fg_color=COLOR_BG, corner_radius=0,
+                         border_width=0, **kwargs)
 
         self.headers = headers
 
-        self.table_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.table_container = ctk.CTkFrame(self, fg_color="transparent",
+                                            border_width=0)
         self.table_container.pack(fill="both", expand=True)
 
-        # ── Scrollbar minimalista ──────────────────────────────────────────────
+        # ── Scrollbar con mejor contraste ─────────────────────────────
         style = ttk.Style()
         style.theme_use("clam")
 
-        # Scrollbar vertical delgada y moderna
         style.configure(
             "Slim.Vertical.TScrollbar",
             gripcount=0,
-            background="#1e1e36",
-            darkcolor="#1e1e36",
-            lightcolor="#1e1e36",
+            background="#3a3a6a",
+            darkcolor="#3a3a6a",
+            lightcolor="#3a3a6a",
             troughcolor="#0e0e1a",
             bordercolor="#0e0e1a",
             arrowcolor="#0e0e1a",
             arrowsize=0,
             relief="flat",
             borderwidth=0,
-            width=6,
+            width=10,
         )
         style.map(
             "Slim.Vertical.TScrollbar",
             background=[
-                ("active", "#4a4a7a"),
-                ("!active", "#2a2a50"),
+                ("active", "#6a6aaa"),
+                ("!active", "#3a3a6a"),
             ],
         )
 
@@ -86,7 +87,7 @@ class ModernTable(ctk.CTkFrame):
             elif idx == 4:
                 self.tree.column(header, width=120, minwidth=100, anchor="center")
 
-        # ── Estilos de tabla ───────────────────────────────────────────────────
+        # ── Estilos de tabla — sin bordes blancos ──────────────────────
         style.configure(
             "Excel.Treeview",
             background=COLOR_TABLE_ROW_ODD,
@@ -94,17 +95,16 @@ class ModernTable(ctk.CTkFrame):
             fieldbackground=COLOR_TABLE_ROW_ODD,
             font=FONT_TABLE,
             rowheight=32,
-            borderwidth=1,
-            relief="solid",
+            borderwidth=0,
+            relief="flat",
         )
         style.configure(
             "Excel.Treeview.Heading",
             background=COLOR_TABLE_HEADER,
             foreground=COLOR_TEXT,
             font=FONT_TABLE_HEADER,
-            relief="solid",
-            borderwidth=1,
-            bordercolor=COLOR_GRID_LINE,
+            relief="flat",
+            borderwidth=0,
         )
         style.map("Excel.Treeview.Heading", background=[("active", COLOR_ACCENT)])
         style.map(

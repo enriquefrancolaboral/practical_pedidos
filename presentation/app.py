@@ -61,7 +61,7 @@ class App(ctk.CTk):
             print(f"No se pudo cargar el icono: {e}")
 
         self.geometry("1200x750")
-        self.minsize(900, 600)
+        self.minsize(1010, 600)
         self.configure(fg_color=COLOR_BG)
 
         self.estado_conexion = "Iniciando..."
@@ -143,6 +143,7 @@ class App(ctk.CTk):
         self.lbl_estado_conexion = ctk.CTkLabel(
             left, text="Estado: Iniciando...",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
+            wraplength=240, anchor="w",
         )
         self.lbl_estado_conexion.pack(padx=18, pady=(0, 4), anchor="w")
 
@@ -150,6 +151,7 @@ class App(ctk.CTk):
         self.lbl_countdown = ctk.CTkLabel(
             left, text="Próxima sincronización: --",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
+            wraplength=240, anchor="w",
         )
         self.lbl_countdown.pack(padx=18, pady=(0, 12), anchor="w")
 
@@ -183,6 +185,7 @@ class App(ctk.CTk):
 
         self.lbl_footer = ctk.CTkLabel(
             left, text="Listo.", font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM,
+            wraplength=240, anchor="w", justify="left",
         )
         self.lbl_footer.pack(side="bottom", fill="x", padx=18, pady=(0, 15))
 
@@ -288,7 +291,6 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
     def _iniciar_countdown(self, segundos: int):
         """Arranca la cuenta regresiva visible en el panel izquierdo."""
-        # Cancelar cualquier countdown previo
         if self._timer_countdown is not None:
             self.after_cancel(self._timer_countdown)
             self._timer_countdown = None
@@ -320,7 +322,6 @@ class App(ctk.CTk):
         items = list(self._historial_sync)
         for i, lbl in enumerate(self.lbl_historial_items):
             if i < len(items):
-                # Formato: HH:MM:SS — DD/MM/YYYY
                 texto = items[i].strftime("%H:%M:%S  —  %d/%m/%Y")
                 lbl.configure(text=texto, text_color="#9090b8")
             else:
@@ -337,7 +338,6 @@ class App(ctk.CTk):
         if segundos_faltantes <= 0:
             segundos_faltantes += 300
 
-        # Iniciar cuenta regresiva visible
         self.after(0, lambda: self._iniciar_countdown(segundos_faltantes))
 
         self.timer_proximo = Timer(segundos_faltantes, self._lanzar_sincronizacion_en_hilo)
@@ -403,7 +403,6 @@ class App(ctk.CTk):
                 self.after(0, lambda: self.log_ui(msg))
                 self._log(f"[SYNC] {msg}")
 
-                # Registrar en historial y refrescar UI
                 self.after(0, lambda ts=ts_sync: self._registrar_sync_exitosa(ts))
                 self.after(0, self._actualizar_ui_estado)
 
@@ -461,16 +460,15 @@ class App(ctk.CTk):
     # Alertas serializadas sin solapamiento (RF-14 – RF-20, RF-28)
     # ------------------------------------------------------------------
     def _generar_alertas_secuenciales(self, pedidos: list):
-        """Un único hilo reproduce todas las alertas en serie.
-        El lock global en audio.py impide cualquier solapamiento."""
+        """Un único hilo reproduce todas las alertas en serie."""
         def cola():
             for pedido in pedidos:
                 alerto = False
                 if self.check_sonido_var.get() == "on":
-                    alerta_sonora()   # bloqueante + lock
+                    alerta_sonora()
                     alerto = True
                 if self.check_lectura_var.get() == "on":
-                    reproducir_texto( # bloqueante + lock
+                    reproducir_texto(
                         f"El vendedor {pedido.vendedor} ha cargado "
                         f"un pedido para {pedido.cliente}"
                     )
