@@ -3,7 +3,7 @@ from playwright.sync_api import sync_playwright
 from typing import Callable, Optional, Dict, Any
 from threading import Event
 from core.modelos import Pedido, Credenciales
-import pandas as pd
+import openpyxl
 import os
 import sys
 import tempfile
@@ -96,34 +96,79 @@ class ServicioNodo:
                 self.log("[PEDIDOS] Descarga completada")
 
                 self.log("[PEDIDOS] Procesando datos...")
-                df = pd.read_excel(temp_path)
-                tiene_fecha = 'Fecha' in df.columns
-
+                wb = openpyxl.load_workbook(temp_path, read_only=True, data_only=True)
+                sheet = wb.active
+                
+                headers = []
+                for row in sheet.iter_rows(max_row=1, values_only=True):
+                    headers = list(row)
+                    break
+                    
+                header_map = {name: idx for idx, name in enumerate(headers) if name is not None}
+                tiene_fecha = 'Fecha' in header_map
+                
                 pedidos = []
-                for idx, (_, row) in enumerate(df.iterrows()):
+                idx = 0
+                for row_cells in sheet.iter_rows(min_row=2, values_only=True):
+                    factura_idx = header_map.get('Factura')
+                    if factura_idx is None or factura_idx >= len(row_cells) or row_cells[factura_idx] is None:
+                        continue
+                        
+                    factura = str(row_cells[factura_idx])
+                    
                     # --- CORRECCIÓN RF-10 ---
                     # Si el Excel tiene columna Fecha real, usarla.
                     # Si no, asignar fechas incrementales desde una base fija para que
                     # el índice de fila determine el orden (más alto = más reciente).
                     fecha_pedido = _FECHA_BASE + timedelta(seconds=idx)
-                    if tiene_fecha and pd.notna(row.get('Fecha')):
+                    if tiene_fecha:
+                        fecha_idx = header_map['Fecha']
+                        if fecha_idx < len(row_cells) and row_cells[fecha_idx] is not None:
+                            fecha_val = row_cells[fecha_idx]
+                            if isinstance(fecha_val, datetime):
+                                fecha_pedido = fecha_val
+                            else:
+                                try:
+                                    fecha_pedido = datetime.fromisoformat(str(fecha_val))
+                                except Exception:
+                                    try:
+                                        fecha_pedido = datetime.strptime(str(fecha_val), '%Y-%m-%d %H:%M:%S')
+                                    except Exception:
+                                        pass
+                                        
+                    estado_idx = header_map.get('EstadoTransaccion')
+                    estado = str(row_cells[estado_idx]) if (estado_idx is not None and estado_idx < len(row_cells) and row_cells[estado_idx] is not None) else ""
+                    
+                    total_idx = header_map.get('Total')
+                    total = 0.0
+                    if total_idx is not None and total_idx < len(row_cells) and row_cells[total_idx] is not None:
                         try:
-                            fecha_pedido = pd.to_datetime(row['Fecha']).to_pydatetime()
-                        except Exception:
-                            pass  # Mantener el valor incremental como fallback
-
+                            total = float(row_cells[total_idx])
+                        except (ValueError, TypeError):
+                            total = 0.0
+                            
+                    cliente_idx = header_map.get('Cliente')
+                    cliente = str(row_cells[cliente_idx]) if (cliente_idx is not None and cliente_idx < len(row_cells) and row_cells[cliente_idx] is not None) else ""
+                    
+                    vendedor_idx = header_map.get('Vendedor')
+                    vendedor = str(row_cells[vendedor_idx]) if (vendedor_idx is not None and vendedor_idx < len(row_cells) and row_cells[vendedor_idx] is not None) else ""
+                    
+                    moneda_idx = header_map.get('Moneda')
+                    moneda = str(row_cells[moneda_idx]) if (moneda_idx is not None and moneda_idx < len(row_cells) and row_cells[moneda_idx] is not None) else ""
+                    
                     pedido = Pedido(
-                        numero_pedido=str(row.get('Factura', '')),
+                        numero_pedido=factura,
                         fecha=fecha_pedido,
-                        estado=str(row.get('EstadoTransaccion', '')),
-                        total=float(row.get('Total', 0)) if pd.notna(row.get('Total')) else 0.0,
-                        cliente=str(row.get('Cliente', '')),
-                        vendedor=str(row.get('Vendedor', '')),
-                        moneda=str(row.get('Moneda', '')) if pd.notna(row.get('Moneda')) else "",
+                        estado=estado,
+                        total=total,
+                        cliente=cliente,
+                        vendedor=vendedor,
+                        moneda=moneda,
                     )
                     pedidos.append(pedido)
-
-                # NO invertir aquí: _actualizar_tabla en app.py ordena por fecha desc.
+                    idx += 1
+                    
+                wb.close()
                 self.log(f"[PEDIDOS] Procesados {len(pedidos)} pedidos")
 
                 resultado["exito"] = True

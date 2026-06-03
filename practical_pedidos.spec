@@ -1,46 +1,41 @@
+# practical_pedidos.spec
 # -*- mode: python ; coding: utf-8 -*-
+
 import os
+import sys
 from pathlib import Path
+import customtkinter
 
-# Buscar la carpeta de navegadores de Playwright
-playwright_browsers = os.path.expanduser('~\\AppData\\Local\\ms-playwright')
-
-# Crear una lista de datos para incluir
-browser_data = []
-if os.path.exists(playwright_browsers):
-    for item in os.listdir(playwright_browsers):
-        src = os.path.join(playwright_browsers, item)
-        dst = os.path.join('ms-playwright', item)
-        if os.path.isdir(src):
-            browser_data.append((src, dst))
+customtkinter_path = os.path.dirname(customtkinter.__file__)
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[
-        ('presentation/assets/icono.ico', 'presentation/assets'),
         ('presentation/assets', 'presentation/assets'),
-    ] + browser_data,  # Agregar los navegadores
+        (os.path.join(customtkinter_path, 'assets'), 'customtkinter/assets'),
+    ],
     hiddenimports=[
         'customtkinter',
-        'pandas',
         'openpyxl',
         'playwright',
-        'playwright.async_api',
         'playwright.sync_api',
+        'playwright.async_api',
+        'edge_tts',
         'keyring',
         'keyring.backends.Windows',
-        'numpy',
-        'sounddevice',
-        'edge_tts',
-        'miniaudio',
         'asyncio',
+        'threading',
+        'queue',
+        'tempfile',
+        'glob',
+        'subprocess',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['numpy', 'pandas', 'sounddevice', 'miniaudio', 'cffi', '_cffi_backend'],
     noarchive=False,
 )
 
@@ -49,26 +44,22 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='PracticalPedidos',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # Cambia a True para ver errores
+    console=False,  # Sin ventana de consola
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='presentation/assets/icono.ico',
+    icon='presentation/assets/icono.ico' if os.path.exists('presentation/assets/icono.ico') else None,
 )
 
-# Agregar COLLECT para incluir la carpeta de navegadores
 coll = COLLECT(
     exe,
     a.binaries,

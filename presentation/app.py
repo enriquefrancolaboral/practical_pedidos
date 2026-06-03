@@ -14,14 +14,9 @@ from collections import deque
 
 PREFS_PATH = os.path.join(os.environ.get('APPDATA', '.'), 'PracticalPedidos', 'preferencias.json')
 
-from data.repositorio_pedidos import RepositorioPedidos
-from data.servicio_nodo import ServicioNodo
 from core.modelos import Credenciales
 from core.estado_pedidos import GestorEstadoPedidos
 from presentation.componentes.tabla import ModernTable
-from presentation.componentes.audio import alerta_sonora, reproducir_texto
-from presentation.ventanas.credenciales import VentanaCredenciales
-from utils.credentials import credenciales_configuradas, cargar_credenciales
 from utils.path_utils import resource_path
 from utils.logger import log as log_archivo  # RF-30
 
@@ -66,6 +61,7 @@ class App(ctk.CTk):
 
         self.estado_conexion = "Iniciando..."
 
+        from data.repositorio_pedidos import RepositorioPedidos
         self.repositorio    = RepositorioPedidos()
         self.gestor_estado  = GestorEstadoPedidos(log_fn=self._log)
         self.sync_en_progreso   = False
@@ -100,6 +96,7 @@ class App(ctk.CTk):
     # UI
     # ------------------------------------------------------------------
     def _verificar_credenciales(self):
+        from utils.credentials import credenciales_configuradas
         if not credenciales_configuradas():
             self.lbl_footer.configure(text="⚠ Credenciales no configuradas.")
             self.estado_conexion = "Sin credenciales"
@@ -117,7 +114,7 @@ class App(ctk.CTk):
         left.grid(row=0, column=0, sticky="nsew")
         left.grid_propagate(False)
 
-        ctk.CTkLabel(left, text="P E D I D O S", font=FONT_APP_TITLE,
+        ctk.CTkLabel(left, text="PEDIDOS", font=FONT_APP_TITLE,
                      text_color=COLOR_TEXT).pack(padx=18, pady=(22, 2), anchor="w")
         ctk.CTkLabel(left, text="Alerta de nuevos pedidos en NODO",
                      font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM
@@ -143,7 +140,7 @@ class App(ctk.CTk):
         self.lbl_estado_conexion = ctk.CTkLabel(
             left, text="Estado: Iniciando...",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
-            wraplength=240, anchor="w",
+            wraplength=220, anchor="w",
         )
         self.lbl_estado_conexion.pack(padx=18, pady=(0, 4), anchor="w")
 
@@ -151,7 +148,7 @@ class App(ctk.CTk):
         self.lbl_countdown = ctk.CTkLabel(
             left, text="Próxima sincronización: --",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
-            wraplength=240, anchor="w",
+            wraplength=220, anchor="w",
         )
         self.lbl_countdown.pack(padx=18, pady=(0, 12), anchor="w")
 
@@ -185,7 +182,7 @@ class App(ctk.CTk):
 
         self.lbl_footer = ctk.CTkLabel(
             left, text="Listo.", font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM,
-            wraplength=240, anchor="w", justify="left",
+            wraplength=220, anchor="w", justify="left",
         )
         self.lbl_footer.pack(side="bottom", fill="x", padx=18, pady=(0, 15))
 
@@ -257,6 +254,7 @@ class App(ctk.CTk):
     # Checkboxes
     # ------------------------------------------------------------------
     def _on_check_sonido(self):
+        from presentation.componentes.audio import alerta_sonora
         if self.check_sonido_var.get() == "on":
             self._log("[CONFIG] Sonido activado - reproduciendo prueba.")
             threading.Thread(target=alerta_sonora, daemon=True).start()
@@ -265,6 +263,7 @@ class App(ctk.CTk):
         self._guardar_preferencias()
 
     def _on_check_lectura(self):
+        from presentation.componentes.audio import reproducir_texto
         if self.check_lectura_var.get() == "on":
             self._log("[CONFIG] Lectura activada - probando TTS.")
             threading.Thread(
@@ -280,6 +279,7 @@ class App(ctk.CTk):
     # Credenciales
     # ------------------------------------------------------------------
     def _on_config_credenciales(self):
+        from presentation.ventanas.credenciales import VentanaCredenciales
         VentanaCredenciales(self, on_guardado=self._on_credenciales_guardadas)
 
     def _on_credenciales_guardadas(self):
@@ -346,6 +346,9 @@ class App(ctk.CTk):
 
     def _ejecutar_sincronizacion(self):
         """Corre íntegramente en un hilo background. Actualiza UI via self.after()."""
+        from utils.credentials import credenciales_configuradas, cargar_credenciales
+        from data.servicio_nodo import ServicioNodo
+
         if self.sync_en_progreso:
             self._log("[SYNC] Sincronización previa en progreso. Omitiendo.")
             self._programar_proxima_sincronizacion()
@@ -461,6 +464,7 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
     def _generar_alertas_secuenciales(self, pedidos: list):
         """Un único hilo reproduce todas las alertas en serie."""
+        from presentation.componentes.audio import alerta_sonora, reproducir_texto
         def cola():
             for pedido in pedidos:
                 alerto = False
