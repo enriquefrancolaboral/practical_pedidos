@@ -98,7 +98,7 @@ class App(ctk.CTk):
     def _verificar_credenciales(self):
         from utils.credentials import credenciales_configuradas
         if not credenciales_configuradas():
-            self.lbl_footer.configure(text="⚠ Credenciales no configuradas.")
+            self._actualizar_footer("⚠ Credenciales no configuradas.")
             self.estado_conexion = "Sin credenciales"
             self._actualizar_ui_estado()
 
@@ -112,7 +112,7 @@ class App(ctk.CTk):
     def _build_panel_izquierdo(self):
         left = ctk.CTkFrame(self, width=280, fg_color=COLOR_PANEL, corner_radius=0)
         left.grid(row=0, column=0, sticky="nsew")
-        left.grid_propagate(False)
+        left.pack_propagate(False)
 
         ctk.CTkLabel(left, text="PEDIDOS", font=FONT_APP_TITLE,
                      text_color=COLOR_TEXT).pack(padx=18, pady=(22, 2), anchor="w")
@@ -140,17 +140,17 @@ class App(ctk.CTk):
         self.lbl_estado_conexion = ctk.CTkLabel(
             left, text="Estado: Iniciando...",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
-            wraplength=220, anchor="w",
+            wraplength=220, anchor="w", height=35,
         )
-        self.lbl_estado_conexion.pack(padx=18, pady=(0, 4), anchor="w")
+        self.lbl_estado_conexion.pack(padx=18, pady=(0, 4), fill="x", anchor="w")
 
         # Cuenta regresiva
         self.lbl_countdown = ctk.CTkLabel(
             left, text="Próxima sincronización: --",
             font=FONT_SMALL, text_color=COLOR_TEXT_DIM,
-            wraplength=220, anchor="w",
+            wraplength=220, anchor="w", height=35,
         )
-        self.lbl_countdown.pack(padx=18, pady=(0, 12), anchor="w")
+        self.lbl_countdown.pack(padx=18, pady=(0, 12), fill="x", anchor="w")
 
         # ── Historial de sincronizaciones ──────────────────────────────
         ctk.CTkLabel(
@@ -165,9 +165,9 @@ class App(ctk.CTk):
         self.lbl_historial_items: list[ctk.CTkLabel] = []
         for _ in range(10):
             lbl = ctk.CTkLabel(
-                hist_frame, text="",
+                hist_frame, text=" ",
                 font=FONT_SMALL_DIM, text_color="#555577",
-                anchor="w",
+                anchor="w", height=20,
             )
             lbl.pack(padx=10, pady=1, fill="x", anchor="w")
             self.lbl_historial_items.append(lbl)
@@ -182,7 +182,7 @@ class App(ctk.CTk):
 
         self.lbl_footer = ctk.CTkLabel(
             left, text="Listo.", font=("Segoe UI", 10), text_color=COLOR_TEXT_DIM,
-            wraplength=220, anchor="w", justify="left",
+            wraplength=220, anchor="w", justify="left", height=45,
         )
         self.lbl_footer.pack(side="bottom", fill="x", padx=18, pady=(0, 15))
 
@@ -283,7 +283,7 @@ class App(ctk.CTk):
         VentanaCredenciales(self, on_guardado=self._on_credenciales_guardadas)
 
     def _on_credenciales_guardadas(self):
-        self.lbl_footer.configure(text="Credenciales guardadas correctamente.")
+        self._actualizar_footer("Credenciales guardadas correctamente.")
         self.after(1000, self._lanzar_sincronizacion_en_hilo)
 
     # ------------------------------------------------------------------
@@ -325,18 +325,18 @@ class App(ctk.CTk):
                 texto = items[i].strftime("%H:%M:%S  —  %d/%m/%Y")
                 lbl.configure(text=texto, text_color="#9090b8")
             else:
-                lbl.configure(text="", text_color="#555577")
+                lbl.configure(text=" ", text_color="#555577")
 
     # ------------------------------------------------------------------
     # Sincronización (RF-07, RF-08, RF-09)
     # ------------------------------------------------------------------
     def _programar_proxima_sincronizacion(self):
-        """Programa la próxima sync en el siguiente múltiplo exacto de 5 min (RF-07)."""
+        """Programa la próxima sync en el siguiente múltiplo exacto de 3 min (RF-07)."""
         ahora = datetime.now()
-        minutos_faltantes  = (5 - (ahora.minute % 5)) % 5
+        minutos_faltantes  = (3 - (ahora.minute % 3)) % 3
         segundos_faltantes = minutos_faltantes * 60 - ahora.second
         if segundos_faltantes <= 0:
-            segundos_faltantes += 300
+            segundos_faltantes += 180
 
         self.after(0, lambda: self._iniciar_countdown(segundos_faltantes))
 
@@ -355,7 +355,7 @@ class App(ctk.CTk):
             return
 
         if not credenciales_configuradas():
-            self.after(0, lambda: self.lbl_footer.configure(text="⚠ Credenciales no configuradas."))
+            self.after(0, lambda: self._actualizar_footer("⚠ Credenciales no configuradas."))
             self.estado_conexion = "Error: Sin credenciales"
             self.after(0, self._actualizar_ui_estado)
             self._programar_proxima_sincronizacion()
@@ -487,10 +487,19 @@ class App(ctk.CTk):
     # Estado UI
     # ------------------------------------------------------------------
     def _actualizar_ui_estado(self):
-        self.lbl_estado_conexion.configure(text=f"Estado: {self.estado_conexion}")
+        txt = f"Estado: {self.estado_conexion}"
+        if len(txt) > 35:
+            txt = txt[:32] + "..."
+        self.lbl_estado_conexion.configure(text=txt)
+
+    def _actualizar_footer(self, mensaje: str):
+        msg_corto = mensaje
+        if len(mensaje) > 70:
+            msg_corto = mensaje[:67] + "..."
+        self.lbl_footer.configure(text=msg_corto)
 
     def log_ui(self, mensaje: str):
-        self.after(0, lambda: self.lbl_footer.configure(text=mensaje))
+        self.after(0, lambda: self._actualizar_footer(mensaje))
         print(mensaje)
 
     # ------------------------------------------------------------------

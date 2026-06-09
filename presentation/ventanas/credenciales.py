@@ -98,7 +98,7 @@ class VentanaCredenciales(ctk.CTkToplevel):
         self._campo_password(f, "entry_nodo_pass", "••••••••", pady_bottom=18)
         
         # Etiqueta de mensajes (error/success)
-        self.lbl_mensaje = ctk.CTkLabel(f, text="", font=("Segoe UI", 10), text_color=COLOR_ERROR)
+        self.lbl_mensaje = ctk.CTkLabel(f, text=" ", font=("Segoe UI", 10), text_color=COLOR_ERROR, height=40)
         self.lbl_mensaje.pack(padx=28, pady=(0, 4))
         
         # Botones
@@ -229,7 +229,7 @@ class VentanaCredenciales(ctk.CTkToplevel):
         self.lbl_mensaje.configure(text=mensaje, text_color=color)
         # Limpiar mensaje después de 5 segundos si es éxito o error
         if color != COLOR_TEXT_DIM:
-            self.after(5000, lambda: self.lbl_mensaje.configure(text=""))
+            self.after(5000, lambda: self.lbl_mensaje.configure(text=" "))
     
     def _habilitar_botones(self):
         """Re-habilita los botones después de una operación"""
