@@ -32,15 +32,15 @@ La información descargada deberá mantenerse en memoria para poder compararse c
 
 ### RF-07. Sincronización programada
 
-El sistema deberá realizar verificaciones automáticas cada 5 minutos exactos de reloj.
+El sistema deberá realizar verificaciones automáticas cada 3 minutos exactos de reloj.
 
 Ejemplo:
 
 * 06:00
-* 06:05
-* 06:10
-* 06:15
-* 06:20
+* 06:03
+* 06:06
+* 06:09
+* 06:12
 
 No deberá utilizar intervalos relativos desde la hora de inicio del programa.
 
