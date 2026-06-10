@@ -5,7 +5,6 @@ import tempfile
 import os
 import ctypes
 import threading
-import time
 import winsound
 import struct
 import math
@@ -15,48 +14,50 @@ VOZ_TOMAS = "es-AR-TomasNeural"
 _audio_lock = threading.Lock()
 
 
-def _generar_wav(frecuencia: float, duracion_ms: int,
-                  volumen: float = 0.8, sample_rate: int = 44100) -> bytes:
-    """Genera un tono sinusoidal como WAV en memoria (con fade in/out para evitar clicks)."""
-    num_samples = int(sample_rate * duracion_ms / 1000)
-    fade_samples = int(sample_rate * 0.012)  # 12 ms de fade
+def _generar_wav_secuencia(tonos: list, sample_rate: int = 44100) -> bytes:
+    """
+    Genera una secuencia de tonos como un único buffer WAV.
+    tonos: [(frecuencia_hz, duracion_ms, silencio_post_ms), ...]
+    """
+    all_samples = bytearray()
+    fade_samples = int(sample_rate * 0.012)  # 12 ms fade in/out
 
-    raw = bytearray()
-    for i in range(num_samples):
-        fade = 1.0
-        if i < fade_samples:
-            fade = i / fade_samples
-        elif i > num_samples - fade_samples:
-            fade = (num_samples - i) / fade_samples
-        sample = int(32767 * volumen * fade *
-                     math.sin(2 * math.pi * frecuencia * i / sample_rate))
-        raw.extend(struct.pack('<h', max(-32768, min(32767, sample))))
+    for freq, dur_ms, silence_ms in tonos:
+        n = int(sample_rate * dur_ms / 1000)
+        for i in range(n):
+            fade = 1.0
+            if i < fade_samples:
+                fade = i / fade_samples
+            elif i > n - fade_samples:
+                fade = (n - i) / fade_samples
+            s = int(32767 * 0.8 * fade * math.sin(2 * math.pi * freq * i / sample_rate))
+            all_samples.extend(struct.pack('<h', max(-32768, min(32767, s))))
+        # silencio entre tonos
+        all_samples.extend(b'\x00\x00' * int(sample_rate * silence_ms / 1000))
 
-    data_size = len(raw)
+    data_size = len(all_samples)
     header = struct.pack(
         '<4sI4s4sIHHIIHH4sI',
         b'RIFF', 36 + data_size, b'WAVE',
-        b'fmt ', 16,
-        1,            # PCM
-        1,            # mono
-        sample_rate,
-        sample_rate * 2,
-        2,
-        16,
+        b'fmt ', 16, 1, 1,
+        sample_rate, sample_rate * 2, 2, 16,
         b'data', data_size,
     )
-    return header + bytes(raw)
+    return header + bytes(all_samples)
+
+
+# Pre-generar el WAV de alerta una sola vez al importar el módulo
+_WAV_ALERTA = _generar_wav_secuencia([
+    (880,  250, 80),   # primer tono + 80 ms de silencio
+    (1318, 350, 0),    # segundo tono
+])
 
 
 def alerta_sonora():
-    """Reproduce alerta sonora bloqueante usando WAV en memoria (confiable)."""
+    """Reproduce la alerta sonora completa en una única llamada bloqueante."""
     with _audio_lock:
         try:
-            beep1 = _generar_wav(880,  250)
-            winsound.PlaySound(beep1, winsound.SND_MEMORY)
-            time.sleep(0.08)
-            beep2 = _generar_wav(1318, 350)
-            winsound.PlaySound(beep2, winsound.SND_MEMORY)
+            winsound.PlaySound(_WAV_ALERTA, winsound.SND_MEMORY)
         except Exception as e:
             print(f"Error en alerta_sonora: {e}")
 
