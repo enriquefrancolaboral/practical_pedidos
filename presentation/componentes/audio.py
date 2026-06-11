@@ -76,6 +76,7 @@ async def _tts_bloqueante(texto: str):
     except Exception as e:
         print(f"Error en _tts_bloqueante: {e}")
     finally:
+        # FIX #5: eliminación del archivo siempre en finally, incluso si MCI falla
         if os.path.exists(path):
             try:
                 os.unlink(path)
@@ -86,10 +87,14 @@ async def _tts_bloqueante(texto: str):
 def reproducir_texto(texto: str):
     """Reproduce TTS bloqueando el lock global. Debe llamarse desde un hilo no-UI."""
     with _audio_lock:
+        loop = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(_tts_bloqueante(texto))
-            loop.close()
         except Exception as e:
             print(f"Error en reproducir_texto: {e}")
+        finally:
+            # FIX #5: cierre garantizado del event loop incluso ante excepciones
+            if loop is not None and not loop.is_closed():
+                loop.close()

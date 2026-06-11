@@ -9,7 +9,7 @@ import os
 import sys
 import json
 from datetime import datetime
-from threading import Timer
+from threading import Timer, Lock
 from collections import deque
 
 PREFS_PATH = os.path.join(os.environ.get('APPDATA', '.'), 'PracticalPedidos', 'preferencias.json')
@@ -64,11 +64,15 @@ class App(ctk.CTk):
         from data.repositorio_pedidos import RepositorioPedidos
         self.repositorio    = RepositorioPedidos()
         self.gestor_estado  = GestorEstadoPedidos(log_fn=self._log)
+
+        # FIX #2: Lock para proteger sync_en_progreso contra race conditions
+        self._sync_lock = Lock()
         self.sync_en_progreso   = False
+
         self.timer_proximo: Timer = None
         self.primera_sincronizacion = True
 
-        # Historial de hasta 10 sincronizaciones exitosas (RF mod)
+        # Historial de hasta 10 sincronizaciones exitosas
         self._historial_sync: deque = deque(maxlen=10)
 
         # Cuenta regresiva
@@ -158,7 +162,6 @@ class App(ctk.CTk):
             font=("Segoe UI", 10, "bold"), text_color=COLOR_TEXT_DIM,
         ).pack(padx=18, pady=(0, 4), anchor="w")
 
-        # Frame con fondo ligeramente diferenciado
         hist_frame = ctk.CTkFrame(left, fg_color=COLOR_ACCENT, corner_radius=6)
         hist_frame.pack(padx=14, pady=(0, 16), fill="x")
 
@@ -174,7 +177,7 @@ class App(ctk.CTk):
 
         # ── Botones y footer ───────────────────────────────────────────
         self.btn_config = ctk.CTkButton(
-            left, text="🔧  Configurar Credenciales", font=FONT_BTN,
+            left, text="🔑 Configurar Credenciales", font=FONT_BTN,
             fg_color=COLOR_BTN_CONFIG, hover_color=COLOR_BTN_CONFIG_HOV,
             corner_radius=7, height=40, command=self._on_config_credenciales,
         )
@@ -290,7 +293,7 @@ class App(ctk.CTk):
     # Cuenta regresiva (RF mod 1)
     # ------------------------------------------------------------------
     def _iniciar_countdown(self, segundos: int):
-        """Arranca la cuenta regresiva visible en el panel izquierdo."""
+        """Arranca la cuenta regresiva — debe llamarse SIEMPRE desde el hilo principal."""
         if self._timer_countdown is not None:
             self.after_cancel(self._timer_countdown)
             self._timer_countdown = None
@@ -331,14 +334,18 @@ class App(ctk.CTk):
     # Sincronización (RF-07, RF-08, RF-09)
     # ------------------------------------------------------------------
     def _programar_proxima_sincronizacion(self):
-        """Programa la próxima sync en el siguiente múltiplo exacto de 3 min (RF-07)."""
+        """
+        Programa la próxima sync en el siguiente múltiplo exacto de 3 min.
+        Puede llamarse desde cualquier hilo; despacha el countdown al hilo principal.
+        """
         ahora = datetime.now()
         minutos_faltantes  = (3 - (ahora.minute % 3)) % 3
         segundos_faltantes = minutos_faltantes * 60 - ahora.second
         if segundos_faltantes <= 0:
             segundos_faltantes += 180
 
-        self.after(0, lambda: self._iniciar_countdown(segundos_faltantes))
+        # FIX #3: _iniciar_countdown modifica widgets — siempre en hilo principal
+        self.after(0, lambda s=segundos_faltantes: self._iniciar_countdown(s))
 
         self.timer_proximo = Timer(segundos_faltantes, self._lanzar_sincronizacion_en_hilo)
         self.timer_proximo.daemon = True
@@ -349,24 +356,26 @@ class App(ctk.CTk):
         from utils.credentials import credenciales_configuradas, cargar_credenciales
         from data.servicio_nodo import ServicioNodo
 
-        if self.sync_en_progreso:
-            self._log("[SYNC] Sincronización previa en progreso. Omitiendo.")
-            self._programar_proxima_sincronizacion()
-            return
-
-        if not credenciales_configuradas():
-            self.after(0, lambda: self._actualizar_footer("⚠ Credenciales no configuradas."))
-            self.estado_conexion = "Error: Sin credenciales"
-            self.after(0, self._actualizar_ui_estado)
-            self._programar_proxima_sincronizacion()
-            return
-
-        self.sync_en_progreso = True
-        self.estado_conexion = "Conectando..."
-        self.after(0, self._actualizar_ui_estado)
-        self.after(0, lambda: self.log_ui("Iniciando sincronización..."))
+        # FIX #2: uso de Lock para evitar race condition en sync_en_progreso
+        with self._sync_lock:
+            if self.sync_en_progreso:
+                self._log("[SYNC] Sincronización previa en progreso. Omitiendo.")
+                self._programar_proxima_sincronizacion()
+                return
+            self.sync_en_progreso = True
 
         try:
+            if not credenciales_configuradas():
+                self.after(0, lambda: self._actualizar_footer("⚠ Credenciales no configuradas."))
+                self.estado_conexion = "Error: Sin credenciales"
+                self.after(0, self._actualizar_ui_estado)
+                self._programar_proxima_sincronizacion()
+                return
+
+            self.estado_conexion = "Conectando..."
+            self.after(0, self._actualizar_ui_estado)
+            self.after(0, lambda: self.log_ui("Iniciando sincronización..."))
+
             user, pwd = cargar_credenciales(self._log)
             if not user or not pwd:
                 self.estado_conexion = "Error: Credenciales inválidas"
@@ -403,7 +412,7 @@ class App(ctk.CTk):
                 self.gestor_estado.guardar_estado_actual()
                 msg = (f"Sincronización exitosa — "
                        f"{len(nuevos)} nuevo(s), {len(modificados)} modificado(s)")
-                self.after(0, lambda: self.log_ui(msg))
+                self.after(0, lambda m=msg: self._actualizar_footer(m))
                 self._log(f"[SYNC] {msg}")
 
                 self.after(0, lambda ts=ts_sync: self._registrar_sync_exitosa(ts))
@@ -414,15 +423,18 @@ class App(ctk.CTk):
 
             else:
                 self.estado_conexion = "Error"
-                self.after(0, lambda: self.log_ui(f"Error: {resultado['mensaje']}"))
+                self.after(0, lambda m=resultado['mensaje']: self.log_ui(f"Error: {m}"))
                 self._log(f"[ERROR CONEXIÓN] {resultado['mensaje']}")
 
         except Exception as e:
             self.estado_conexion = "Error"
-            self.after(0, lambda: self.log_ui(f"Error inesperado: {str(e)}"))
-            self._log(f"[ERROR] {str(e)}")
+            msg = str(e)
+            self.after(0, lambda m=msg: self.log_ui(f"Error inesperado: {m}"))
+            self._log(f"[ERROR] {msg}")
         finally:
-            self.sync_en_progreso = False
+            # FIX #2: liberar el lock correctamente
+            with self._sync_lock:
+                self.sync_en_progreso = False
             self.after(0, self._actualizar_ui_estado)
             self._programar_proxima_sincronizacion()
 
@@ -498,8 +510,9 @@ class App(ctk.CTk):
             msg_corto = mensaje[:67] + "..."
         self.lbl_footer.configure(text=msg_corto)
 
+    # FIX #1: log_ui eliminó el doble self.after() — ahora actualiza directamente
     def log_ui(self, mensaje: str):
-        self.after(0, lambda: self._actualizar_footer(mensaje))
+        self._actualizar_footer(mensaje)
         print(mensaje)
 
     # ------------------------------------------------------------------
@@ -509,8 +522,10 @@ class App(ctk.CTk):
         self._log("[APP] Cerrando aplicación.")
         if self.timer_proximo:
             self.timer_proximo.cancel()
+        # FIX #6: cancelar countdown antes de destroy para evitar callbacks huérfanos
         if self._timer_countdown:
             self.after_cancel(self._timer_countdown)
+            self._timer_countdown = None
         self._guardar_preferencias()
         self.gestor_estado.guardar_estado_actual()
         self.destroy()
